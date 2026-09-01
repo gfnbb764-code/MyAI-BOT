@@ -20,14 +20,12 @@ class Database:
 
         self.create_tables()
 
-
     # =========================================================
     # أدوات داخلية
     # =========================================================
 
     def now(self):
         return datetime.utcnow().isoformat()
-
 
     # =========================================================
     # إنشاء الجداول
@@ -67,7 +65,6 @@ class Database:
                 )
             """)
 
-
             # -------------------------------------------------
             # الرسائل
             # -------------------------------------------------
@@ -92,7 +89,6 @@ class Database:
                 )
             """)
 
-
             # -------------------------------------------------
             # إعدادات السيرفر
             # -------------------------------------------------
@@ -111,9 +107,7 @@ class Database:
                 )
             """)
 
-
             self.connection.commit()
-
 
     # =========================================================
     # الشخصيات
@@ -167,7 +161,6 @@ class Database:
 
                 return False
 
-
     def get_character(
         self,
         guild_id,
@@ -191,7 +184,6 @@ class Database:
 
             return cursor.fetchone()
 
-
     def get_characters(
         self,
         guild_id
@@ -207,11 +199,10 @@ class Database:
                 WHERE guild_id = ?
                 ORDER BY id ASC
             """, (
-                str(guild_id)
+                str(guild_id),
             ))
 
             return cursor.fetchall()
-
 
     def delete_character(
         self,
@@ -235,7 +226,6 @@ class Database:
             self.connection.commit()
 
             return cursor.rowcount > 0
-
 
     # =========================================================
     # الرسائل
@@ -278,7 +268,6 @@ class Database:
 
             self.connection.commit()
 
-
     def get_history(
         self,
         guild_id,
@@ -318,7 +307,6 @@ class Database:
                 for row in rows
             ]
 
-
     def clear_history(
         self,
         guild_id,
@@ -343,7 +331,6 @@ class Database:
 
             self.connection.commit()
 
-
     # =========================================================
     # إعدادات السيرفر
     # =========================================================
@@ -363,11 +350,10 @@ class Database:
                 )
                 VALUES (?)
             """, (
-                str(guild_id)
+                str(guild_id),
             ))
 
             self.connection.commit()
-
 
     def get_settings(
         self,
@@ -385,11 +371,10 @@ class Database:
                 FROM guild_settings
                 WHERE guild_id = ?
             """, (
-                str(guild_id)
+                str(guild_id),
             ))
 
             return cursor.fetchone()
-
 
     def set_active_character(
         self,
@@ -415,7 +400,6 @@ class Database:
             ))
 
             self.connection.commit()
-
 
     def set_provider(
         self,
@@ -445,7 +429,6 @@ class Database:
 
             self.connection.commit()
 
-
     def set_auto_chat(
         self,
         guild_id,
@@ -470,7 +453,6 @@ class Database:
             ))
 
             self.connection.commit()
-
 
     # =========================================================
     # إغلاق قاعدة البيانات
