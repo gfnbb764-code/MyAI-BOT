@@ -1,4 +1,3 @@
-```python
 import os
 import json
 from typing import Optional, Dict, Any
@@ -1287,4 +1286,3 @@ class AIEngine:
             return response
 
         return f"ALERT: {response}"
-```
