@@ -1,157 +1,178 @@
 import os
 import re
-import time
-import traceback
-
+import asyncio
 import discord
-from discord import app_commands
+
 from discord.ext import commands
+from discord import app_commands
 
 from database import Database
 from ai_engine import AIEngine
 
 
-# =========================================================
+# ==========================================================
 # CONFIG
-# =========================================================
+# ==========================================================
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-AUTO_CHECK_MESSAGE_COUNT = 30
-AUTO_COOLDOWN_SECONDS = 300
-
-BOT_CHAT_MAX_REPLIES = 100
-BOT_CHAT_COOLDOWN_SECONDS = 2
-
-DEFAULT_PROVIDER = os.getenv(
+PRIMARY_AI_PROVIDER = os.getenv(
     "PRIMARY_AI_PROVIDER",
-    "google",
-).lower().strip()
+    "google"
+)
 
-DEFAULT_MODEL = os.getenv(
+GOOGLE_MODEL = os.getenv(
     "GOOGLE_MODEL",
-    "gemini-3.5-flash-lite",
-).strip()
+    "gemini-3.5-flash-lite"
+)
 
 
-# =========================================================
-# AI MODES / STYLES
-# =========================================================
+# ==========================================================
+# AI MODES
+# ==========================================================
 
 AI_MODES = {
     "normal": {
         "temperature": 0.7,
-        "description": "ردود طبيعية ومتوازنة",
+        "description": "ردود طبيعية ومتوازنة"
     },
-
     "friendly": {
         "temperature": 0.85,
-        "description": "ردود ودية وحماسية",
+        "description": "ردود ودية وحماسية"
     },
-
     "active": {
         "temperature": 0.8,
-        "description": "ردود نشطة وتفاعلية",
+        "description": "ردود نشطة وتفاعلية"
     },
-
     "fun": {
         "temperature": 0.95,
-        "description": "ردود مرحة",
+        "description": "ردود مرحة"
     },
-
     "professional": {
         "temperature": 0.45,
-        "description": "ردود رسمية",
-    },
+        "description": "ردود رسمية"
+    }
 }
 
 
-STYLE_MODES = {
-    "normal",
-    "friendly",
-    "active",
-    "fun",
-    "professional",
-}
-
-REPLY_MODES = {
+REPLY_TYPES = {
     "mention",
     "direct",
     "channel",
     "auto",
-    "bot_chat",
+    "bot_chat"
 }
 
 
-# =========================================================
-# DISCORD INTENTS
-# =========================================================
+# ==========================================================
+# SENSITIVE SECURITY
+# ==========================================================
+
+SENSITIVE_ACTIONS = {
+    "manage_roles",
+    "manage_channels",
+    "edit_channel_permissions",
+    "create_role",
+    "delete_role",
+    "edit_role",
+    "assign_role",
+    "remove_role",
+    "ban",
+    "kick",
+    "timeout",
+    "manage_guild"
+}
+
+
+SENSITIVE_KEYWORDS = (
+    "احذف الرتبة",
+    "حذف الرتبة",
+    "أنشئ رتبة",
+    "انشئ رتبة",
+    "عدل الرتبة",
+    "غيّر صلاحيات",
+    "غير صلاحيات",
+    "صلاحيات الرتبة",
+    "صلاحيات الروم",
+    "صلاحيات القناة",
+    "احذف الروم",
+    "حذف الروم",
+    "أنشئ روم",
+    "انشئ روم",
+    "عدل الروم",
+    "غيّر اسم الروم",
+    "غير اسم الروم",
+    "بان",
+    "طرد",
+    "تايم اوت",
+    "timeout",
+    "ban",
+    "kick",
+    "delete role",
+    "create role",
+    "manage roles",
+    "manage channels",
+    "permissions"
+)
+
+
+# ==========================================================
+# INTENTS
+# ==========================================================
 
 intents = discord.Intents.default()
 
 intents.guilds = True
-intents.messages = True
-intents.message_content = True
 intents.members = True
 intents.presences = True
+intents.messages = True
+intents.message_content = True
 
 
-# =========================================================
+# ==========================================================
 # DATABASE / AI
-# =========================================================
+# ==========================================================
 
 db = Database()
+
 ai = AIEngine(db)
 
 
-# =========================================================
-# RUNTIME STATE
-# =========================================================
-
-auto_message_counter = {}
-auto_last_reply = {}
-
-bot_chat_reply_count = {}
-bot_chat_last_reply = {}
-
-user_memory = {}
-
-
-# =========================================================
-# BOT CLASS
-# =========================================================
+# ==========================================================
+# BOT
+# ==========================================================
 
 class MyAIBot(commands.Bot):
+
+    def __init__(self):
+
+        super().__init__(
+            command_prefix="!",
+            intents=intents
+        )
 
     async def setup_hook(self):
 
         try:
-
             synced = await self.tree.sync()
 
             print(
                 f"Synced {len(synced)} slash commands."
             )
 
-        except Exception:
+        except Exception as e:
 
             print(
-                "❌ Failed to sync slash commands."
+                f"❌ Slash command sync error: {e}"
             )
 
-            traceback.print_exc()
+
+bot = MyAIBot()
 
 
-bot = MyAIBot(
-    command_prefix="!",
-    intents=intents,
-    help_command=None,
-)
-
-
-# =========================================================
+# ==========================================================
 # HELPERS
-# =========================================================
+# ==========================================================
 
 def row_to_dict(row):
 
@@ -159,366 +180,170 @@ def row_to_dict(row):
         return None
 
     if isinstance(row, dict):
-        return dict(row)
-
-    try:
-        return dict(row)
-
-    except Exception:
         return row
+
+    return dict(row)
 
 
 def get_config(guild_id):
 
-    try:
-
-        config = db.get_guild_config(
-            guild_id
-        )
-
-        if config is None:
-
-            return {
-                "enabled": False,
-                "channel_id": None,
-                "mode": "normal",
-                "reply_type": "normal",
-                "character_name": None,
-                "permission_preset": "admin",
-                "provider": DEFAULT_PROVIDER,
-                "model": DEFAULT_MODEL,
-            }
-
-        config = row_to_dict(config)
-
-        config.setdefault(
-            "enabled",
-            False,
-        )
-
-        config.setdefault(
-            "channel_id",
-            None,
-        )
-
-        config.setdefault(
-            "mode",
-            "normal",
-        )
-
-        config.setdefault(
-            "reply_type",
-            "normal",
-        )
-
-        config.setdefault(
-            "character_name",
-            None,
-        )
-
-        config.setdefault(
-            "permission_preset",
-            "admin",
-        )
-
-        config.setdefault(
-            "provider",
-            DEFAULT_PROVIDER,
-        )
-
-        config.setdefault(
-            "model",
-            DEFAULT_MODEL,
-        )
-
-        return config
-
-    except Exception:
-
-        print(
-            "❌ get_config() failed"
-        )
-
-        traceback.print_exc()
-
-        return {
-            "enabled": False,
-            "channel_id": None,
-            "mode": "normal",
-            "reply_type": "normal",
-            "character_name": None,
-            "permission_preset": "admin",
-            "provider": DEFAULT_PROVIDER,
-            "model": DEFAULT_MODEL,
-        }
-
-
-def save_config(guild_id, **kwargs):
-
-    try:
-
-        return db.update_guild_config(
-            guild_id,
-            **kwargs,
-        )
-
-    except Exception:
-
-        print(
-            "❌ save_config() failed"
-        )
-
-        traceback.print_exc()
-
-        return None
+    return db.get_ai_config(guild_id)
 
 
 def get_character(
     guild_id,
-    character_id,
+    name
 ):
 
-    try:
-
-        return db.get_character_by_id(
-            guild_id,
-            int(character_id),
-        )
-
-    except Exception:
-
-        print(
-            "❌ get_character() failed"
-        )
-
-        traceback.print_exc()
-
+    if not name:
         return None
+
+    return row_to_dict(
+        db.get_character(
+            guild_id,
+            name
+        )
+    )
 
 
 def get_active_character(guild_id):
 
-    try:
-
-        return db.get_active_character(
+    return row_to_dict(
+        db.get_active_character(
             guild_id
         )
-
-    except Exception:
-
-        print(
-            "❌ get_active_character() failed"
-        )
-
-        traceback.print_exc()
-
-        return None
-
-
-def normalize_channel_id(value):
-
-    if value is None:
-        return None
-
-    try:
-        return int(value)
-
-    except Exception:
-        return None
-
-
-def channel_matches(
-    message,
-    config,
-):
-
-    configured_channel = normalize_channel_id(
-        config.get("channel_id")
-    )
-
-    if configured_channel is None:
-        return True
-
-    return (
-        message.channel.id
-        == configured_channel
     )
 
 
 def as_bool(value):
 
-    if isinstance(
-        value,
-        bool,
-    ):
-        return value
+    return bool(value)
 
-    if isinstance(
-        value,
-        int,
-    ):
-        return value != 0
 
-    if value is None:
-        return False
+def normalize_text(text):
 
-    return str(
-        value
-    ).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-        "enabled",
-        "مفعل",
-    }
+    return re.sub(
+        r"\s+",
+        " ",
+        str(text or "")
+    ).strip()
+
+
+def clean_mentions(
+    text,
+    bot_user
+):
+
+    if bot_user:
+
+        text = text.replace(
+            f"<@{bot_user.id}>",
+            ""
+        )
+
+        text = text.replace(
+            f"<@!{bot_user.id}>",
+            ""
+        )
+
+    return normalize_text(text)
 
 
 def split_message(
     text,
-    limit=1900,
+    limit=1900
 ):
 
-    if not text:
-        return []
+    text = str(text)
 
     return [
         text[i:i + limit]
         for i in range(
             0,
             len(text),
-            limit,
+            limit
         )
     ]
 
 
-def clean_mentions(text):
+def normalize_channel_id(value):
 
-    if not text:
-        return ""
+    try:
+        return int(value)
+    except Exception:
+        return None
 
-    text = re.sub(
-        r"<@!?\d+>",
-        "",
-        text,
+
+def channel_matches(
+    message,
+    config
+):
+
+    configured = normalize_channel_id(
+        config.get("channel_id")
     )
 
-    text = re.sub(
-        r"<@&\d+>",
-        "",
-        text,
-    )
+    if configured is None:
+        return True
 
-    text = re.sub(
-        r"<#\d+>",
-        "",
-        text,
-    )
-
-    return text.strip()
-
-
-def normalize_text(text):
-
-    if not text:
-        return ""
-
-    return " ".join(
-        text.strip().split()
-    )
+    return message.channel.id == configured
 
 
 def is_directed_to_bot(message):
 
-    if (
-        bot.user
-        and message.author.id
-        == bot.user.id
-    ):
-        return True
+    if not bot.user:
+        return False
 
-    if (
-        bot.user
-        and bot.user in message.mentions
-    ):
-        return True
-
-    content = (
-        message.content
-        .lower()
-        .strip()
+    return (
+        bot.user in message.mentions
+        or message.content.lower().startswith(
+            bot.user.name.lower()
+        )
     )
 
-    if bot.user:
 
-        bot_names = {
-            bot.user.name.lower(),
-            bot.user.display_name.lower(),
-        }
-
-        for name in bot_names:
-
-            if (
-                name
-                and name in content
-            ):
-                return True
-
-    return False
-
-
-# =========================================================
-# PERMISSIONS
-# =========================================================
+# ==========================================================
+# MANAGEMENT PERMISSIONS
+# ==========================================================
 
 def has_management_permission(
-    member,
+    member
 ):
 
-    if member is None:
+    if not isinstance(
+        member,
+        discord.Member
+    ):
         return False
 
-    try:
+    if member.guild.owner_id == member.id:
+        return True
 
-        permissions = (
-            member.guild_permissions
-        )
+    permissions = member.guild_permissions
 
-        return (
-            permissions.administrator
-            or permissions.manage_guild
-        )
-
-    except Exception:
-
-        return False
+    return (
+        permissions.administrator
+        or permissions.manage_guild
+        or permissions.manage_channels
+        or permissions.manage_roles
+    )
 
 
 def can_manage_ai(obj):
 
     if isinstance(
         obj,
-        discord.Interaction,
+        discord.Interaction
     ):
-
         member = obj.user
 
     elif isinstance(
         obj,
-        discord.Message,
+        discord.Message
     ):
-
         member = obj.author
 
     else:
-
-        return False
-
-    if not isinstance(
-        member,
-        discord.Member,
-    ):
-
         return False
 
     return has_management_permission(
@@ -526,550 +351,640 @@ def can_manage_ai(obj):
     )
 
 
-# =========================================================
-# AI RESPONSE
-# =========================================================
+# ==========================================================
+# TOP 3 ROLES SECURITY
+# ==========================================================
+
+def get_top_three_roles(
+    guild
+):
+
+    roles = [
+        role
+        for role in guild.roles
+        if role != guild.default_role
+    ]
+
+    roles.sort(
+        key=lambda role: role.position,
+        reverse=True
+    )
+
+    return roles[:3]
+
+
+def member_has_top_three_role(
+    member
+):
+
+    if not isinstance(
+        member,
+        discord.Member
+    ):
+        return False
+
+    top_roles = get_top_three_roles(
+        member.guild
+    )
+
+    top_role_ids = {
+        role.id
+        for role in top_roles
+    }
+
+    return any(
+        role.id in top_role_ids
+        for role in member.roles
+    )
+
+
+def is_sensitive_request(
+    text
+):
+
+    normalized = normalize_text(
+        text
+    ).lower()
+
+    return any(
+        keyword.lower() in normalized
+        for keyword in SENSITIVE_KEYWORDS
+    )
+
+
+def security_check(
+    member,
+    action=None
+):
+
+    if not isinstance(
+        member,
+        discord.Member
+    ):
+        return False, "عضو غير صالح."
+
+    # Server owner gets the highest authority.
+    if member.guild.owner_id == member.id:
+        return True, "server_owner"
+
+    if not member_has_top_three_role(member):
+        return (
+            False,
+            "هذا الإجراء حساس ومسموح فقط لأعلى 3 رتب في السيرفر."
+        )
+
+    if action == "manage_roles":
+        if not member.guild_permissions.manage_roles:
+            return (
+                False,
+                "تحتاج إلى Manage Roles."
+            )
+
+    elif action == "manage_channels":
+        if not member.guild_permissions.manage_channels:
+            return (
+                False,
+                "تحتاج إلى Manage Channels."
+            )
+
+    elif action == "manage_guild":
+        if not member.guild_permissions.manage_guild:
+            return (
+                False,
+                "تحتاج إلى Manage Server."
+            )
+
+    elif action == "ban":
+        if not member.guild_permissions.ban_members:
+            return (
+                False,
+                "تحتاج إلى Ban Members."
+            )
+
+    elif action == "kick":
+        if not member.guild_permissions.kick_members:
+            return (
+                False,
+                "تحتاج إلى Kick Members."
+            )
+
+    elif action == "timeout":
+        if not member.guild_permissions.moderate_members:
+            return (
+                False,
+                "تحتاج إلى Moderate Members."
+            )
+
+    return True, "authorized"
+
+
+def bot_can_manage_role(
+    guild,
+    role
+):
+
+    me = guild.me
+
+    if me is None:
+        return False
+
+    if role == guild.default_role:
+        return False
+
+    return role < me.top_role
+
+
+def bot_can_manage_member(
+    guild,
+    member
+):
+
+    me = guild.me
+
+    if me is None:
+        return False
+
+    return member.top_role < me.top_role
+
+
+# ==========================================================
+# AI GENERATION
+# ==========================================================
 
 async def generate_chat_reply(
     message,
-    config,
-    prompt=None,
+    config
 ):
 
-    try:
+    character_name = (
+        config.get("character_name")
+        or "مساعد السيرفر جيميناي"
+    )
 
-        if message.guild is None:
-            return None
+    ai_mode = (
+        config.get("mode")
+        or "normal"
+    )
 
-        guild_id = (
-            message.guild.id
-        )
-
-        # -------------------------------------------------
-        # Active character
-        # -------------------------------------------------
-
-        character = get_active_character(
-            guild_id
-        )
-
-        character_name = None
-
-        if character:
-
-            character = row_to_dict(
-                character
-            )
-
-            character_name = (
-                character.get("name")
-                or character.get(
-                    "character_name"
-                )
-            )
-
-        # -------------------------------------------------
-        # Fallback to config character
-        # -------------------------------------------------
-
-        if not character_name:
-
-            character_name = config.get(
-                "character_name"
-            )
-
-        if not character_name:
-
-            print(
-                "❌ No active AI character configured."
-            )
-
-            return None
-
-        # -------------------------------------------------
-        # Prompt
-        # -------------------------------------------------
-
-        user_text = prompt
-
-        if user_text is None:
-
-            user_text = (
-                message.content
-            )
-
-        user_text = clean_mentions(
-            user_text
-        )
-
-        user_text = normalize_text(
-            user_text
-        )
-
-        if not user_text:
-
-            user_text = "مرحبا"
-
-        # -------------------------------------------------
-        # Mode
-        # -------------------------------------------------
-
-        mode = str(
-            config.get(
-                "mode",
-                "normal",
-            )
-            or "normal"
-        ).lower().strip()
-
-        if mode not in (
-            STYLE_MODES
-            | REPLY_MODES
-        ):
-
-            mode = "normal"
-
-        # AIEngine uses style settings
-        # for reply modes that are not styles.
-
-        ai_mode = (
-            mode
-            if mode in STYLE_MODES
-            else "normal"
-        )
-
-        mode_data = AI_MODES.get(
-            ai_mode,
-            AI_MODES["normal"],
-        )
-
-        # -------------------------------------------------
-        # Provider
-        # -------------------------------------------------
-
-        provider = str(
-            config.get(
-                "provider",
-                DEFAULT_PROVIDER,
-            )
-            or DEFAULT_PROVIDER
-        ).lower().strip()
-
-        # -------------------------------------------------
-        # Model
-        # -------------------------------------------------
-
-        model = str(
-            config.get(
-                "model",
-                DEFAULT_MODEL,
-            )
-            or DEFAULT_MODEL
-        ).strip()
-
-        # -------------------------------------------------
-        # Diagnostics
-        # -------------------------------------------------
+    if ai_mode not in AI_MODES:
 
         print(
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            f"⚠️ Unknown AI mode: {ai_mode}"
         )
 
-        print(
-            "🧠 GENERATING AI RESPONSE"
-        )
+        ai_mode = "normal"
 
-        print(
-            f"🏠 Guild     : "
-            f"{message.guild.name}"
-        )
+    provider = (
+        config.get("provider")
+        or PRIMARY_AI_PROVIDER
+    )
 
-        print(
-            f"👤 User      : "
-            f"{message.author}"
-        )
+    model = (
+        config.get("model")
+        or GOOGLE_MODEL
+    )
 
-        print(
-            f"📝 Prompt    : "
-            f"{user_text}"
-        )
+    user_text = clean_mentions(
+        message.content,
+        bot.user
+    )
 
-        print(
-            f"🎭 Character : "
-            f"{character_name}"
-        )
+    if not user_text:
+        user_text = "تكلم معي."
 
-        print(
-            f"⚙️ Mode      : "
-            f"{mode}"
-        )
+    print("🧠 GENERATING AI RESPONSE")
 
-        print(
-            f"🌡️ Temp      : "
-            f"{mode_data['temperature']}"
-        )
+    print(
+        f"🎭 Character : {character_name}"
+    )
 
-        print(
-            f"🤖 Provider  : "
-            f"{provider}"
-        )
+    print(
+        f"⚙️ Mode      : {ai_mode}"
+    )
 
-        print(
-            f"🧠 Model     : "
-            f"{model}"
-        )
+    print(
+        f"🤖 Provider  : {provider}"
+    )
 
-        print(
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
+    print(
+        f"🧠 Model     : {model}"
+    )
 
-        # -------------------------------------------------
-        # IMPORTANT:
-        #
-        # AIEngine.generate() requires:
-        #
-        # guild_id
-        # channel_id
-        # user_id
-        # character_name
-        # prompt
-        # mode
-        # provider
-        # model
-        #
-        # DO NOT pass temperature here.
-        # AIEngine handles it internally.
-        # -------------------------------------------------
+    response = await ai.generate(
+        guild_id=message.guild.id,
+        channel_id=message.channel.id,
+        user_id=message.author.id,
+        character_name=character_name,
+        prompt=user_text,
+        mode=ai_mode,
+        provider=provider,
+        model=model
+    )
 
-        response = await ai.generate(
+    return response
 
-            guild_id=guild_id,
 
-            channel_id=(
-                message.channel.id
-            ),
+async def generate_dm_reply(
+    message
+):
 
-            user_id=(
-                message.author.id
-            ),
+    character_name = (
+        db.DM_CHARACTER_NAME
+    )
 
-            character_name=(
-                character_name
-            ),
+    response = await ai.generate(
+        guild_id=db.DM_GUILD_ID,
+        channel_id=message.channel.id,
+        user_id=message.author.id,
+        character_name=character_name,
+        prompt=message.content,
+        mode="friendly",
+        provider="google",
+        model=GOOGLE_MODEL
+    )
 
-            prompt=user_text,
+    return response
 
-            mode=ai_mode,
 
-            provider=provider,
-
-            model=model,
-        )
-
-        if response is None:
-
-            print(
-                "⚠️ AI returned None"
-            )
-
-            return None
-
-        response = str(
-            response
-        ).strip()
-
-        response = re.sub(
-            r"^\s*ALERT:\s*",
-            "",
-            response,
-            flags=re.IGNORECASE,
-        ).strip()
-
-        if not response:
-
-            print(
-                "⚠️ AI returned empty response"
-            )
-
-            return None
-
-        print(
-            f"✅ AI RESPONSE LENGTH: "
-            f"{len(response)}"
-        )
-
-        return response
-
-    except Exception:
-
-        print(
-            "❌ generate_chat_reply() failed"
-        )
-
-        traceback.print_exc()
-
-        return None
-
+# ==========================================================
+# SEND
+# ==========================================================
 
 async def send_ai_response(
     message,
-    response,
+    response
 ):
 
     if not response:
         return
 
-    chunks = split_message(
-        response
+    response = str(response).strip()
+
+    for part in split_message(response):
+
+        if not part:
+            continue
+
+        try:
+            await message.reply(
+                part,
+                mention_author=False
+            )
+
+        except discord.HTTPException as e:
+
+            print(
+                f"❌ Failed sending AI response: {e}"
+            )
+
+
+# ==========================================================
+# DM COMMAND
+# ==========================================================
+
+@bot.tree.command(
+    name="ai_dm",
+    description="تشغيل أو إيقاف رد MyAI في الخاص"
+)
+@app_commands.describe(
+    option="اختر Enabled أو Disable"
+)
+@app_commands.choices(
+    option=[
+        app_commands.Choice(
+            name="Enabled",
+            value="enabled"
+        ),
+        app_commands.Choice(
+            name="Disable",
+            value="disable"
+        )
+    ]
+)
+async def ai_dm(
+    interaction: discord.Interaction,
+    option: app_commands.Choice[str]
+):
+
+    enabled = (
+        option.value == "enabled"
     )
 
-    for chunk in chunks:
+    db.set_dm_enabled(
+        interaction.user.id,
+        enabled
+    )
+
+    if enabled:
+
+        await interaction.response.send_message(
+            "✅ تم تفعيل MyAI في الخاص.\n"
+            "الآن إذا أرسلت لي رسالة في DM سأرد عليك 🤖💬",
+            ephemeral=True
+        )
+
+    else:
+
+        await interaction.response.send_message(
+            "🔕 تم تعطيل MyAI في الخاص.",
+            ephemeral=True
+        )
+
+
+# ==========================================================
+# MESSAGE EVENT
+# ==========================================================
+
+@bot.event
+async def on_message(
+    message
+):
+
+    print()
+    print("📩 NEW MESSAGE EVENT RECEIVED")
+
+    print(
+        f"👤 Sender     : {message.author}"
+    )
+
+    print(
+        f"🆔 Author ID  : {message.author.id}"
+    )
+
+    print(
+        f"🤖 Is Bot     : {message.author.bot}"
+    )
+
+    print(
+        f"📝 Message    : {message.content!r}"
+    )
+
+    # ------------------------------------------------------
+    # Ignore MyAI itself
+    # ------------------------------------------------------
+
+    if bot.user and message.author.id == bot.user.id:
+
+        print(
+            "⏭️ Ignored MyAI own message"
+        )
+
+        return
+
+    # ------------------------------------------------------
+    # DM
+    # ------------------------------------------------------
+
+    if message.guild is None:
+
+        enabled = db.get_dm_enabled(
+            message.author.id
+        )
+
+        if not enabled:
+
+            print(
+                "⏭️ DM disabled for this user"
+            )
+
+            return
+
+        print(
+            "📩 DM AI enabled"
+        )
 
         try:
 
-            await message.channel.send(
-                chunk
+            response = await generate_dm_reply(
+                message
             )
 
-        except Exception:
+            await send_ai_response(
+                message,
+                response
+            )
+
+        except Exception as e:
 
             print(
-                "❌ Failed to send AI response"
+                f"❌ DM AI error: {e}"
             )
 
-            traceback.print_exc()
+        return
 
-            break
+    # ------------------------------------------------------
+    # BOT USERS
+    # ------------------------------------------------------
 
+    if message.author.bot:
 
-# =========================================================
-# AUTO AI
-# =========================================================
+        print(
+            "⏭️ Ignored another bot"
+        )
 
-async def handle_auto_ai(
-    message,
-    config,
-):
+        return
 
-    guild_id = (
+    # ------------------------------------------------------
+    # CONFIG
+    # ------------------------------------------------------
+
+    config = get_config(
         message.guild.id
     )
 
-    auto_message_counter[
-        guild_id
-    ] = (
-        auto_message_counter.get(
-            guild_id,
-            0,
-        )
-        + 1
-    )
-
-    count = auto_message_counter[
-        guild_id
-    ]
-
-    now = time.time()
-
-    last_reply = auto_last_reply.get(
-        guild_id,
-        0,
-    )
-
-    print(
-        f"🤖 AUTO MODE | "
-        f"messages={count}/"
-        f"{AUTO_CHECK_MESSAGE_COUNT}"
-    )
-
-    if (
-        count
-        < AUTO_CHECK_MESSAGE_COUNT
-    ):
-
-        return
-
-    if (
-        now - last_reply
-        < AUTO_COOLDOWN_SECONDS
-    ):
+    if not config.get("enabled"):
 
         print(
-            "⏳ Auto cooldown active"
+            "⏭️ AI disabled in this server"
         )
 
         return
 
-    auto_message_counter[
-        guild_id
-    ] = 0
+    # ------------------------------------------------------
+    # CHANNEL
+    # ------------------------------------------------------
 
-    auto_last_reply[
-        guild_id
-    ] = now
-
-    response = await generate_chat_reply(
+    if not channel_matches(
         message,
-        config,
-    )
-
-    if response:
-
-        await send_ai_response(
-            message,
-            response,
-        )
-
-
-# =========================================================
-# BOT CHAT
-# =========================================================
-
-async def handle_bot_chat(
-    message,
-    config,
-):
-
-    guild_id = (
-        message.guild.id
-    )
-
-    now = time.time()
-
-    last_reply = bot_chat_last_reply.get(
-        guild_id,
-        0,
-    )
-
-    if (
-        now - last_reply
-        < BOT_CHAT_COOLDOWN_SECONDS
+        config
     ):
 
         print(
-            "⏳ Bot Chat cooldown active"
+            "⏭️ Message is outside configured AI channel"
         )
 
         return
 
-    count = bot_chat_reply_count.get(
-        guild_id,
-        0,
-    )
+    # ------------------------------------------------------
+    # SECURITY
+    # ------------------------------------------------------
 
-    if (
-        count
-        >= BOT_CHAT_MAX_REPLIES
+    if is_sensitive_request(
+        message.content
     ):
 
-        print(
-            f"🛑 Bot Chat limit reached "
-            f"for guild {guild_id}"
+        authorized, reason = security_check(
+            message.author
         )
 
-        return
+        if not authorized:
 
-    if not is_directed_to_bot(
+            print(
+                f"🛡️ BLOCKED SENSITIVE REQUEST: {reason}"
+            )
+
+            await message.reply(
+                "🛡️ **تم رفض الطلب**\n\n"
+                "هذا الإجراء يعتبر حساسًا لإدارة السيرفر، "
+                "ومسموح فقط لأعلى 3 رتب في السيرفر.\n\n"
+                f"السبب: {reason}",
+                mention_author=False
+            )
+
+            return
+
+        print(
+            "🛡️ Sensitive request passed security gate"
+        )
+
+    # ------------------------------------------------------
+    # MODE
+    # ------------------------------------------------------
+
+    mode = (
+        config.get("mode")
+        or "normal"
+    )
+
+    reply_type = (
+        config.get("reply_type")
+        or "mention"
+    )
+
+    directed = is_directed_to_bot(
         message
-    ):
-
-        print(
-            "⏭️ Other bot did not "
-            "address MyAI"
-        )
-
-        return
-
-    bot_chat_last_reply[
-        guild_id
-    ] = now
-
-    bot_chat_reply_count[
-        guild_id
-    ] = count + 1
-
-    response = await generate_chat_reply(
-        message,
-        config,
     )
 
-    if response:
+    # ------------------------------------------------------
+    # MENTION
+    # ------------------------------------------------------
+
+    if reply_type == "mention":
+
+        if not directed:
+
+            return
+
+    # ------------------------------------------------------
+    # DIRECT
+    # ------------------------------------------------------
+
+    elif reply_type == "direct":
+
+        if not directed:
+
+            return
+
+    # ------------------------------------------------------
+    # CHANNEL / AUTO
+    # ------------------------------------------------------
+
+    elif reply_type in {
+        "channel",
+        "auto"
+    }:
+
+        pass
+
+    # ------------------------------------------------------
+    # BOT CHAT
+    # ------------------------------------------------------
+
+    elif reply_type == "bot_chat":
+
+        pass
+
+    # ------------------------------------------------------
+    # STYLE MODES
+    # ------------------------------------------------------
+
+    if mode not in AI_MODES:
+
+        print(
+            f"⚠️ Unknown AI mode: {mode}"
+        )
+
+        mode = "normal"
+
+    print(
+        f"🎯 Selected mode: {reply_type}"
+    )
+
+    try:
+
+        response = await generate_chat_reply(
+            message,
+            config
+        )
 
         await send_ai_response(
             message,
-            response,
+            response
         )
 
+    except Exception as e:
 
-# =========================================================
-# CONNECTION EVENTS
-# =========================================================
+        print(
+            f"❌ AI generation error: {e}"
+        )
 
-@bot.event
-async def on_connect():
+    # ------------------------------------------------------
+    # PROCESS COMMANDS
+    # ------------------------------------------------------
 
-    print(
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    )
-
-    print(
-        "🔌 DISCORD CONNECT EVENT"
-    )
-
-    print(
-        f"📡 Message Content Intent : "
-        f"{bot.intents.message_content}"
-    )
-
-    print(
-        f"👥 Members Intent         : "
-        f"{bot.intents.members}"
-    )
-
-    print(
-        f"🟢 Presence Intent        : "
-        f"{bot.intents.presences}"
-    )
-
-    print(
-        f"🌐 Guilds Intent          : "
-        f"{bot.intents.guilds}"
-    )
-
-    print(
-        f"💬 Messages Intent        : "
-        f"{bot.intents.messages}"
-    )
-
-    print(
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    await bot.process_commands(
+        message
     )
 
 
-@bot.event
-async def on_resumed():
-
-    print(
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    )
-
-    print(
-        "♻️ DISCORD SESSION RESUMED"
-    )
-
-    print(
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    )
-
+# ==========================================================
+# READY
+# ==========================================================
 
 @bot.event
 async def on_ready():
 
     print()
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("🔌 DISCORD CONNECT EVENT")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     print(
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        f"📡 Message Content Intent : "
+        f"{intents.message_content}"
     )
+
+    print(
+        f"👥 Members Intent         : "
+        f"{intents.members}"
+    )
+
+    print(
+        f"🟢 Presence Intent        : "
+        f"{intents.presences}"
+    )
+
+    print(
+        f"🌐 Guilds Intent          : "
+        f"{intents.guilds}"
+    )
+
+    print(
+        f"💬 Messages Intent        : "
+        f"{intents.messages}"
+    )
+
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     print(
         f"✅ Logged in as "
@@ -1088,7 +1003,7 @@ async def on_ready():
 
     print(
         f"📡 Message Content Intent: "
-        f"{bot.intents.message_content}"
+        f"{intents.message_content}"
     )
 
     print(
@@ -1096,1281 +1011,71 @@ async def on_ready():
     )
 
     print(
-        f"🛡️ Bot Chat Safety | "
-        f"max={BOT_CHAT_MAX_REPLIES} | "
-        f"cooldown="
-        f"{BOT_CHAT_COOLDOWN_SECONDS}s"
+        "🛡️ Security Manager: ENABLED"
+    )
+
+    print(
+        "🔐 Sensitive actions: TOP 3 ROLES"
     )
 
     print(
         f"🤖 Active AI Provider | "
-        f"{DEFAULT_PROVIDER}"
+        f"{PRIMARY_AI_PROVIDER}"
     )
 
     print(
         f"🧠 Active AI Model | "
-        f"{DEFAULT_MODEL}"
+        f"{GOOGLE_MODEL}"
     )
 
-    print(
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    )
 
-    print()
-
-
-# =========================================================
-# RAW GATEWAY DIAGNOSTIC
-# =========================================================
-
-@bot.event
-async def on_socket_raw_receive(
-    msg,
-):
-
-    try:
-
-        if (
-            '"t":"MESSAGE_CREATE"'
-            in msg
-        ):
-
-            print(
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            )
-
-            print(
-                "📡 RAW GATEWAY "
-                "MESSAGE_CREATE RECEIVED"
-            )
-
-            print(
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            )
-
-    except Exception:
-
-        pass
-
-
-# =========================================================
-# MESSAGE EDIT
-# =========================================================
-
-@bot.event
-async def on_message_edit(
-    before,
-    after,
-):
-
-    try:
-
-        print(
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-
-        print(
-            "✏️ MESSAGE EDIT EVENT"
-        )
-
-        print(
-            f"👤 Author : "
-            f"{after.author}"
-        )
-
-        print(
-            f"🏠 Guild  : "
-            f"{after.guild}"
-        )
-
-        print(
-            f"📝 Before : "
-            f"{before.content!r}"
-        )
-
-        print(
-            f"📝 After  : "
-            f"{after.content!r}"
-        )
-
-        print(
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-
-    except Exception:
-
-        traceback.print_exc()
-
-
-# =========================================================
-# MESSAGE DELETE
-# =========================================================
-
-@bot.event
-async def on_raw_message_delete(
-    payload,
-):
-
-    try:
-
-        print(
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-
-        print(
-            "🗑️ MESSAGE DELETE EVENT"
-        )
-
-        print(
-            f"🆔 Message ID : "
-            f"{payload.message_id}"
-        )
-
-        print(
-            f"🆔 Channel ID : "
-            f"{payload.channel_id}"
-        )
-
-        print(
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-
-    except Exception:
-
-        traceback.print_exc()
-
-
-# =========================================================
-# MAIN MESSAGE HANDLER
-# =========================================================
-
-@bot.event
-async def on_message(
-    message,
-):
-
-    try:
-
-        print(
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-
-        print(
-            "📩 NEW MESSAGE EVENT RECEIVED"
-        )
-
-        print(
-            f"👤 Sender     : "
-            f"{message.author}"
-        )
-
-        print(
-            f"🆔 Author ID  : "
-            f"{message.author.id}"
-        )
-
-        print(
-            f"🤖 Is Bot     : "
-            f"{message.author.bot}"
-        )
-
-        if message.guild:
-
-            print(
-                f"🏠 Server     : "
-                f"{message.guild.name}"
-            )
-
-            print(
-                f"🆔 Guild ID   : "
-                f"{message.guild.id}"
-            )
-
-        else:
-
-            print(
-                "🏠 Server     : None"
-            )
-
-        print(
-            f"📍 Channel    : "
-            f"{message.channel}"
-        )
-
-        print(
-            f"🆔 Channel ID : "
-            f"{message.channel.id}"
-        )
-
-        print(
-            f"📝 Message    : "
-            f"{message.content!r}"
-        )
-
-        print(
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-
-        # -------------------------------------------------
-        # Ignore MyAI itself
-        # -------------------------------------------------
-
-        if (
-            bot.user
-            and message.author.id
-            == bot.user.id
-        ):
-
-            print(
-                "⏭️ Ignored MyAI own message"
-            )
-
-            return
-
-        # -------------------------------------------------
-        # DM
-        # -------------------------------------------------
-
-        if message.guild is None:
-
-            print(
-                "⏭️ Ignored DM message"
-            )
-
-            return
-
-        # -------------------------------------------------
-        # Config
-        # -------------------------------------------------
-
-        config = get_config(
-            message.guild.id
-        )
-
-        print(
-            "⚙️ AI CONFIG"
-        )
-
-        print(
-            f"   enabled      = "
-            f"{config.get('enabled')}"
-        )
-
-        print(
-            f"   channel_id   = "
-            f"{config.get('channel_id')}"
-        )
-
-        print(
-            f"   mode         = "
-            f"{config.get('mode')}"
-        )
-
-        print(
-            f"   reply_type   = "
-            f"{config.get('reply_type')}"
-        )
-
-        print(
-            f"   character    = "
-            f"{config.get('character_name')}"
-        )
-
-        print(
-            f"   provider     = "
-            f"{config.get('provider')}"
-        )
-
-        print(
-            f"   model        = "
-            f"{config.get('model')}"
-        )
-
-        # -------------------------------------------------
-        # Disabled
-        # -------------------------------------------------
-
-        if not as_bool(
-            config.get("enabled")
-        ):
-
-            print(
-                "⏭️ AI system is disabled"
-            )
-
-            return
-
-        # -------------------------------------------------
-        # Channel filter
-        # -------------------------------------------------
-
-        if not channel_matches(
-            message,
-            config,
-        ):
-
-            print(
-                "⏭️ Message is outside "
-                "configured AI channel"
-            )
-
-            return
-
-        # -------------------------------------------------
-        # BOT MESSAGES
-        # -------------------------------------------------
-
-        if message.author.bot:
-
-            print(
-                "🤖 Message came from "
-                "another bot"
-            )
-
-            mode = str(
-                config.get(
-                    "mode",
-                    "",
-                )
-                or ""
-            ).lower().strip()
-
-            if mode != "bot_chat":
-
-                print(
-                    "⏭️ Other bot ignored "
-                    "(bot_chat is not enabled)"
-                )
-
-                return
-
-            await handle_bot_chat(
-                message,
-                config,
-            )
-
-            return
-
-        # -------------------------------------------------
-        # USER MESSAGE
-        # -------------------------------------------------
-
-        mode = str(
-            config.get(
-                "mode",
-                config.get(
-                    "reply_type",
-                    "normal",
-                ),
-            )
-            or "normal"
-        ).lower().strip()
-
-        print(
-            f"🎯 Selected mode: "
-            f"{mode}"
-        )
-
-        # =================================================
-        # STYLE MODES
-        # =================================================
-
-        if mode in STYLE_MODES:
-
-            print(
-                f"💬 Style mode active: "
-                f"{mode}"
-            )
-
-            response = await generate_chat_reply(
-                message,
-                config,
-            )
-
-            if response:
-
-                await send_ai_response(
-                    message,
-                    response,
-                )
-
-            return
-
-        # =================================================
-        # MENTION
-        # =================================================
-
-        if mode == "mention":
-
-            if not is_directed_to_bot(
-                message
-            ):
-
-                print(
-                    "⏭️ Message does not "
-                    "mention or address MyAI"
-                )
-
-                return
-
-            response = await generate_chat_reply(
-                message,
-                config,
-            )
-
-            if response:
-
-                await send_ai_response(
-                    message,
-                    response,
-                )
-
-            return
-
-        # =================================================
-        # DIRECT
-        # =================================================
-
-        if mode == "direct":
-
-            if not is_directed_to_bot(
-                message
-            ):
-
-                print(
-                    "⏭️ Direct mode: "
-                    "message is not directed "
-                    "to MyAI"
-                )
-
-                return
-
-            response = await generate_chat_reply(
-                message,
-                config,
-            )
-
-            if response:
-
-                await send_ai_response(
-                    message,
-                    response,
-                )
-
-            return
-
-        # =================================================
-        # CHANNEL
-        # =================================================
-
-        if mode == "channel":
-
-            response = await generate_chat_reply(
-                message,
-                config,
-            )
-
-            if response:
-
-                await send_ai_response(
-                    message,
-                    response,
-                )
-
-            return
-
-        # =================================================
-        # AUTO
-        # =================================================
-
-        if mode == "auto":
-
-            await handle_auto_ai(
-                message,
-                config,
-            )
-
-            return
-
-        # =================================================
-        # BOT CHAT
-        # =================================================
-
-        if mode == "bot_chat":
-
-            if not is_directed_to_bot(
-                message
-            ):
-
-                print(
-                    "⏭️ Bot Chat: "
-                    "message did not address MyAI"
-                )
-
-                return
-
-            response = await generate_chat_reply(
-                message,
-                config,
-            )
-
-            if response:
-
-                await send_ai_response(
-                    message,
-                    response,
-                )
-
-            return
-
-        # =================================================
-        # UNKNOWN
-        # =================================================
-
-        print(
-            f"⚠️ Unknown AI mode: "
-            f"{mode}"
-        )
-
-    except Exception:
-
-        print(
-            "❌ UNHANDLED ERROR "
-            "IN on_message"
-        )
-
-        traceback.print_exc()
-
-
-# =========================================================
-# /ai
-# =========================================================
-
-@bot.tree.command(
-    name="ai",
-    description="عرض حالة نظام الذكاء الاصطناعي",
-)
-async def ai_command(
-    interaction: discord.Interaction,
-):
-
-    try:
-
-        if not can_manage_ai(
-            interaction
-        ):
-
-            await interaction.response.send_message(
-                "❌ تحتاج صلاحية Administrator "
-                "أو Manage Server.",
-                ephemeral=True,
-            )
-
-            return
-
-        config = get_config(
-            interaction.guild.id
-        )
-
-        enabled = as_bool(
-            config.get("enabled")
-        )
-
-        mode = config.get(
-            "mode",
-            "normal",
-        )
-
-        channel_id = config.get(
-            "channel_id"
-        )
-
-        provider = config.get(
-            "provider",
-            DEFAULT_PROVIDER,
-        )
-
-        model = config.get(
-            "model",
-            DEFAULT_MODEL,
-        )
-
-        character = config.get(
-            "character_name"
-        )
-
-        text = (
-            "🤖 **MyAI Status**\n\n"
-            f"🟢 الحالة: "
-            f"{'مفعل' if enabled else 'متوقف'}\n"
-            f"⚙️ الوضع: `{mode}`\n"
-            f"📍 الروم: "
-            f"`{channel_id or 'كل الرومات'}`\n"
-            f"🎭 الشخصية: "
-            f"`{character or 'افتراضية'}`\n"
-            f"🔌 Provider: `{provider}`\n"
-            f"🧠 Model: `{model}`"
-        )
-
-        await interaction.response.send_message(
-            text,
-            ephemeral=True,
-        )
-
-    except Exception:
-
-        traceback.print_exc()
-
-        if not interaction.response.is_done():
-
-            await interaction.response.send_message(
-                "❌ حدث خطأ أثناء قراءة حالة AI.",
-                ephemeral=True,
-            )
-
-
-# =========================================================
-# AI SETUP SELECT
-# =========================================================
-
-class AISetupSelect(
-    discord.ui.Select
-):
-
-    def __init__(
-        self,
-    ):
-
-        options = [
-
-            discord.SelectOption(
-                label="Normal",
-                description="رد طبيعي ومتوازن",
-                value="normal",
-            ),
-
-            discord.SelectOption(
-                label="Friendly",
-                description="ردود ودية وحماسية",
-                value="friendly",
-            ),
-
-            discord.SelectOption(
-                label="Active",
-                description="ردود نشطة وتفاعلية",
-                value="active",
-            ),
-
-            discord.SelectOption(
-                label="Fun",
-                description="ردود مرحة",
-                value="fun",
-            ),
-
-            discord.SelectOption(
-                label="Professional",
-                description="ردود رسمية",
-                value="professional",
-            ),
-
-            discord.SelectOption(
-                label="Mention",
-                description="يرد عند منشن MyAI",
-                value="mention",
-            ),
-
-            discord.SelectOption(
-                label="Direct",
-                description="يرد عند توجيه الكلام إلى MyAI",
-                value="direct",
-            ),
-
-            discord.SelectOption(
-                label="Channel",
-                description="يرد على كل رسائل الروم",
-                value="channel",
-            ),
-
-            discord.SelectOption(
-                label="Auto",
-                description="يرد تلقائيًا بعد عدد من الرسائل",
-                value="auto",
-            ),
-
-            discord.SelectOption(
-                label="Bot Chat",
-                description="التفاعل مع البوتات الأخرى",
-                value="bot_chat",
-            ),
-        ]
-
-        super().__init__(
-            placeholder="اختر وضع MyAI",
-            min_values=1,
-            max_values=1,
-            options=options,
-        )
-
-    async def callback(
-        self,
-        interaction: discord.Interaction,
-    ):
-
-        try:
-
-            if not can_manage_ai(
-                interaction
-            ):
-
-                await interaction.response.send_message(
-                    "❌ تحتاج صلاحية Administrator "
-                    "أو Manage Server.",
-                    ephemeral=True,
-                )
-
-                return
-
-            mode = self.values[0]
-
-            channel_id = (
-                interaction.channel.id
-            )
-
-            save_config(
-                interaction.guild.id,
-                enabled=True,
-                channel_id=channel_id,
-                mode=mode,
-                reply_type=mode,
-                provider=DEFAULT_PROVIDER,
-                model=DEFAULT_MODEL,
-            )
-
-            await interaction.response.send_message(
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "✅ **تم تحديث نظام AI**\n\n"
-                f"🟢 الحالة: **مفعل**\n"
-                f"⚙️ الوضع: `{mode}`\n"
-                f"📍 الروم: <#{channel_id}>\n"
-                f"🤖 Provider: `{DEFAULT_PROVIDER}`\n"
-                f"🧠 Model: `{DEFAULT_MODEL}`\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-                ephemeral=True,
-            )
-
-        except Exception:
-
-            traceback.print_exc()
-
-            if not interaction.response.is_done():
-
-                await interaction.response.send_message(
-                    "❌ حدث خطأ أثناء إعداد AI.",
-                    ephemeral=True,
-                )
-
-
-class AISetupView(
-    discord.ui.View
-):
-
-    def __init__(
-        self,
-    ):
-
-        super().__init__(
-            timeout=120
-        )
-
-        self.add_item(
-            AISetupSelect()
-        )
-
-
-# =========================================================
-# /ai_setup
-# =========================================================
-
-@bot.tree.command(
-    name="ai_setup",
-    description="إعداد نظام AI",
-)
-async def ai_setup(
-    interaction: discord.Interaction,
-):
-
-    try:
-
-        if not can_manage_ai(
-            interaction
-        ):
-
-            await interaction.response.send_message(
-                "❌ تحتاج صلاحية Administrator "
-                "أو Manage Server.",
-                ephemeral=True,
-            )
-
-            return
-
-        await interaction.response.send_message(
-            "🤖 **إعداد MyAI**\n\n"
-            "اختر طريقة/أسلوب تفاعل البوت:",
-            view=AISetupView(),
-            ephemeral=True,
-        )
-
-    except Exception:
-
-        traceback.print_exc()
-
-        if not interaction.response.is_done():
-
-            await interaction.response.send_message(
-                "❌ حدث خطأ أثناء فتح إعدادات AI.",
-                ephemeral=True,
-            )
-
-
-# =========================================================
-# /character_create
-# =========================================================
-
-@bot.tree.command(
-    name="character_create",
-    description="إنشاء شخصية AI",
-)
-@app_commands.describe(
-    name="اسم الشخصية",
-    prompt="تعليمات الشخصية",
-)
-async def character_create(
-    interaction: discord.Interaction,
-    name: str,
-    prompt: str,
-):
-
-    try:
-
-        if not can_manage_ai(
-            interaction
-        ):
-
-            await interaction.response.send_message(
-                "❌ تحتاج صلاحية Administrator "
-                "أو Manage Server.",
-                ephemeral=True,
-            )
-
-            return
-
-        result = db.create_character(
-            interaction.guild.id,
-            name,
-            prompt,
-        )
-
-        if result:
-
-            await interaction.response.send_message(
-                f"✅ تم إنشاء الشخصية "
-                f"**{name}**.",
-                ephemeral=True,
-            )
-
-        else:
-
-            await interaction.response.send_message(
-                "❌ تعذر إنشاء الشخصية.",
-                ephemeral=True,
-            )
-
-    except Exception:
-
-        traceback.print_exc()
-
-        if not interaction.response.is_done():
-
-            await interaction.response.send_message(
-                "❌ حدث خطأ أثناء إنشاء الشخصية.",
-                ephemeral=True,
-            )
-
-
-# =========================================================
-# /character_list
-# =========================================================
-
-@bot.tree.command(
-    name="character_list",
-    description="عرض شخصيات AI",
-)
-async def character_list(
-    interaction: discord.Interaction,
-):
-
-    try:
-
-        if not can_manage_ai(
-            interaction
-        ):
-
-            await interaction.response.send_message(
-                "❌ تحتاج صلاحية Administrator "
-                "أو Manage Server.",
-                ephemeral=True,
-            )
-
-            return
-
-        characters = db.list_characters(
-            interaction.guild.id
-        )
-
-        if not characters:
-
-            await interaction.response.send_message(
-                "📭 لا توجد شخصيات.",
-                ephemeral=True,
-            )
-
-            return
-
-        lines = []
-
-        for character in characters:
-
-            character = row_to_dict(
-                character
-            )
-
-            lines.append(
-                f"• `{character.get('id')}` — "
-                f"**{character.get('name')}**"
-            )
-
-        await interaction.response.send_message(
-            "🎭 **الشخصيات:**\n\n"
-            + "\n".join(lines),
-            ephemeral=True,
-        )
-
-    except Exception:
-
-        traceback.print_exc()
-
-        if not interaction.response.is_done():
-
-            await interaction.response.send_message(
-                "❌ حدث خطأ أثناء قراءة الشخصيات.",
-                ephemeral=True,
-            )
-
-
-# =========================================================
-# /character_use
-# =========================================================
-
-@bot.tree.command(
-    name="character_use",
-    description="تفعيل شخصية AI",
-)
-@app_commands.describe(
-    character_id="رقم الشخصية",
-)
-async def character_use(
-    interaction: discord.Interaction,
-    character_id: int,
-):
-
-    try:
-
-        if not can_manage_ai(
-            interaction
-        ):
-
-            await interaction.response.send_message(
-                "❌ تحتاج صلاحية Administrator "
-                "أو Manage Server.",
-                ephemeral=True,
-            )
-
-            return
-
-        character = get_character(
-            interaction.guild.id,
-            character_id,
-        )
-
-        if not character:
-
-            await interaction.response.send_message(
-                "❌ لم يتم العثور على الشخصية.",
-                ephemeral=True,
-            )
-
-            return
-
-        character = row_to_dict(
-            character
-        )
-
-        db.set_active_character(
-            interaction.guild.id,
-            character_id,
-        )
-
-        await interaction.response.send_message(
-            f"🎭 تم تفعيل الشخصية "
-            f"**{character.get('name')}**.",
-            ephemeral=True,
-        )
-
-    except Exception:
-
-        traceback.print_exc()
-
-        if not interaction.response.is_done():
-
-            await interaction.response.send_message(
-                "❌ حدث خطأ أثناء تفعيل الشخصية.",
-                ephemeral=True,
-            )
-
-
-# =========================================================
-# /ai_status
-# =========================================================
-
-@bot.tree.command(
-    name="ai_status",
-    description="عرض حالة MyAI بالتفصيل",
-)
-async def ai_status(
-    interaction: discord.Interaction,
-):
-
-    try:
-
-        config = get_config(
-            interaction.guild.id
-        )
-
-        enabled = as_bool(
-            config.get("enabled")
-        )
-
-        channel_id = config.get(
-            "channel_id"
-        )
-
-        mode = config.get(
-            "mode",
-            "normal",
-        )
-
-        provider = config.get(
-            "provider",
-            DEFAULT_PROVIDER,
-        )
-
-        model = config.get(
-            "model",
-            DEFAULT_MODEL,
-        )
-
-        channel_text = (
-            f"<#{channel_id}>"
-            if channel_id
-            else "All"
-        )
-
-        await interaction.response.send_message(
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🤖 **MYAI STATUS**\n\n"
-            f"🟢 AI: "
-            f"{'ON' if enabled else 'OFF'}\n"
-            f"⚙️ Mode: `{mode}`\n"
-            f"📍 Channel: {channel_text}\n"
-            f"🔌 Provider: `{provider}`\n"
-            f"🧠 Model: `{model}`\n"
-            f"🌐 Servers: `{len(bot.guilds)}`\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            ephemeral=True,
-        )
-
-    except Exception:
-
-        traceback.print_exc()
-
-        if not interaction.response.is_done():
-
-            await interaction.response.send_message(
-                "❌ تعذر الحصول على الحالة.",
-                ephemeral=True,
-            )
-
-
-# =========================================================
-# /ai_memory_clear
-# =========================================================
-
-@bot.tree.command(
-    name="ai_memory_clear",
-    description="مسح ذاكرة AI",
-)
-async def ai_memory_clear(
-    interaction: discord.Interaction,
-):
-
-    try:
-
-        if not can_manage_ai(
-            interaction
-        ):
-
-            await interaction.response.send_message(
-                "❌ تحتاج صلاحية Administrator "
-                "أو Manage Server.",
-                ephemeral=True,
-            )
-
-            return
-
-        guild_id = (
-            interaction.guild.id
-        )
-
-        user_memory.pop(
-            guild_id,
-            None,
-        )
-
-        try:
-
-            if hasattr(
-                db,
-                "clear_messages",
-            ):
-
-                db.clear_messages(
-                    guild_id
-                )
-
-        except Exception:
-
-            traceback.print_exc()
-
-        await interaction.response.send_message(
-            "🧹 تم مسح ذاكرة MyAI.",
-            ephemeral=True,
-        )
-
-    except Exception:
-
-        traceback.print_exc()
-
-        if not interaction.response.is_done():
-
-            await interaction.response.send_message(
-                "❌ حدث خطأ أثناء مسح الذاكرة.",
-                ephemeral=True,
-            )
-
-
-# =========================================================
-# GLOBAL SLASH COMMAND ERROR HANDLER
-# =========================================================
+# ==========================================================
+# GLOBAL SLASH ERROR
+# ==========================================================
 
 @bot.tree.error
 async def on_app_command_error(
     interaction,
-    error,
+    error
 ):
 
     print(
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        f"❌ Slash command error: {error}"
     )
 
-    print(
-        "❌ SLASH COMMAND ERROR"
-    )
-
-    print(
-        f"Command : "
-        f"{interaction.command}"
-    )
-
-    print(
-        f"Error   : "
-        f"{error}"
-    )
-
-    print(
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    )
-
-    traceback.print_exception(
-        type(error),
-        error,
-        error.__traceback__,
-    )
+    if interaction.response.is_done():
+        return
 
     try:
 
-        if interaction.response.is_done():
-
-            await interaction.followup.send(
-                "❌ حدث خطأ أثناء تنفيذ الأمر.",
-                ephemeral=True,
-            )
-
-        else:
-
-            await interaction.response.send_message(
-                "❌ حدث خطأ أثناء تنفيذ الأمر.",
-                ephemeral=True,
-            )
+        await interaction.response.send_message(
+            "❌ حدث خطأ أثناء تنفيذ الأمر.",
+            ephemeral=True
+        )
 
     except Exception:
-
         pass
 
 
-# =========================================================
+# ==========================================================
 # START
-# =========================================================
+# ==========================================================
 
 if __name__ == "__main__":
 
     if not TOKEN:
 
-        print(
-            "❌ DISCORD_TOKEN غير موجود "
-            "في Environment Variables."
+        raise RuntimeError(
+            "DISCORD_TOKEN غير موجود في Environment Variables."
         )
 
-        raise SystemExit(1)
-
-    print(
-        "🚀 Starting MyAI..."
-    )
+    print("🚀 Starting MyAI...")
 
     print(
         f"📡 Message Content Intent configured: "
         f"{intents.message_content}"
     )
 
-    try:
-
-        bot.run(
-            TOKEN
-        )
-
-    except Exception:
-
-        print(
-            "❌ BOT CRASHED"
-        )
-
-        traceback.print_exc()
+    bot.run(
+        TOKEN
+    )
