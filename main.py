@@ -11,7 +11,7 @@ from ai_engine import AIEngine
 
 
 # =========================================================
-# إعدادات عامة
+# CONFIG
 # =========================================================
 
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -19,13 +19,12 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 AUTO_CHECK_MESSAGE_COUNT = 30
 AUTO_COOLDOWN_SECONDS = 300
 
-# عدادات الوضع التلقائي لكل سيرفر
 auto_message_counters = {}
 auto_last_check = {}
 
 
 # =========================================================
-# قاعدة البيانات + محرك الذكاء الاصطناعي
+# DATABASE / AI
 # =========================================================
 
 db = Database()
@@ -33,7 +32,7 @@ ai = AIEngine(db)
 
 
 # =========================================================
-# Discord Intents
+# INTENTS
 # =========================================================
 
 intents = discord.Intents.default()
@@ -43,7 +42,7 @@ intents.message_content = True
 
 
 # =========================================================
-# Bot
+# BOT
 # =========================================================
 
 class MyAIBot(commands.Bot):
@@ -67,69 +66,89 @@ bot = MyAIBot()
 
 
 # =========================================================
-# أدوات مساعدة
+# DATABASE HELPERS
 # =========================================================
-
-def row_to_dict(row):
-    """
-    تحويل sqlite3.Row أو dict إلى dict عادي.
-    """
-    if row is None:
-        return None
-
-    if isinstance(row, dict):
-        return row
-
-    try:
-        return dict(row)
-    except Exception:
-        return row
-
 
 def get_config(guild_id: int):
     """
-    جلب إعدادات السيرفر وتحويلها إلى dict.
-    """
-    config = db.get_config(guild_id)
-
-    if config is None:
-        return None
-
-    return row_to_dict(config)
-
-
-def get_character(guild_id: int, character_name=None):
-    """
-    جلب الشخصية وتحويلها إلى dict.
+    database.py الحالي يستخدم get_ai_config().
     """
 
     try:
-        if character_name:
-            character = db.get_character(
-                guild_id,
-                character_name
-            )
-        else:
-            character = None
+        config = db.get_ai_config(guild_id)
+
+        if config is None:
+            return None
+
+        return dict(config)
+
     except Exception:
-        character = None
+        traceback.print_exc()
+        return None
 
-    if character is None:
-        try:
-            characters = db.list_characters(guild_id)
 
-            if characters:
-                character = characters[0]
-        except Exception:
-            character = None
+def save_config(guild_id: int, **kwargs):
+    """
+    حفظ الإعدادات باستخدام الدالة الفعلية الموجودة في database.py.
+    """
 
-    return row_to_dict(character)
+    return db.save_ai_config(
+        guild_id,
+        **kwargs
+    )
 
+
+def get_character(guild_id: int, name: str = None):
+    """
+    جلب شخصية محددة.
+    """
+
+    if name:
+        character = db.get_character(
+            guild_id,
+            name
+        )
+
+        if character:
+            return dict(character)
+
+    return None
+
+
+def get_active_character(guild_id: int, config):
+    """
+    جلب الشخصية النشطة.
+    """
+
+    character_name = config.get("character_name")
+
+    if character_name:
+        character = get_character(
+            guild_id,
+            character_name
+        )
+
+        if character:
+            return character
+
+    # إذا لم توجد شخصية محددة، نستخدم أول شخصية
+    try:
+        characters = db.get_characters(guild_id)
+
+        if characters:
+            return dict(characters[0])
+
+    except Exception:
+        traceback.print_exc()
+
+    return None
+
+
+# =========================================================
+# MESSAGE SPLITTER
+# =========================================================
 
 def split_message(text: str, limit: int = 1900):
-    """
-    تقسيم رسالة طويلة حتى لا تتجاوز حد Discord.
-    """
 
     if not text:
         return []
@@ -142,15 +161,27 @@ def split_message(text: str, limit: int = 1900):
     chunks = []
 
     while len(text) > limit:
-        split_at = text.rfind("\n", 0, limit)
+
+        split_at = text.rfind(
+            "\n",
+            0,
+            limit
+        )
 
         if split_at <= 0:
-            split_at = text.rfind(" ", 0, limit)
+            split_at = text.rfind(
+                " ",
+                0,
+                limit
+            )
 
         if split_at <= 0:
             split_at = limit
 
-        chunks.append(text[:split_at])
+        chunks.append(
+            text[:split_at]
+        )
+
         text = text[split_at:].lstrip()
 
     if text:
@@ -160,14 +191,10 @@ def split_message(text: str, limit: int = 1900):
 
 
 async def send_ai_response(
-    destination,
-    response: str,
-    *,
-    reply_to_message=None
+    channel,
+    response,
+    reply_to=None
 ):
-    """
-    إرسال رد الذكاء الاصطناعي على أجزاء.
-    """
 
     if not response:
         return
@@ -176,29 +203,29 @@ async def send_ai_response(
 
     for index, chunk in enumerate(chunks):
 
-        if reply_to_message is not None and index == 0:
-            await reply_to_message.reply(
+        if reply_to is not None and index == 0:
+
+            await reply_to.reply(
                 chunk,
                 mention_author=False
             )
+
         else:
-            await destination.send(chunk)
+
+            await channel.send(chunk)
 
 
 # =========================================================
-# صلاحيات أعلى 4 رتب
+# PERMISSIONS
 # =========================================================
 
 def get_top_four_roles(guild: discord.Guild):
-    """
-    إرجاع أعلى 4 رتب في السيرفر حسب ترتيب Discord.
-    @everyone لا تدخل ضمن الحساب.
-    """
 
     roles = [
         role
         for role in guild.roles
         if role != guild.default_role
+        and not role.managed
     ]
 
     roles.sort(
@@ -210,75 +237,70 @@ def get_top_four_roles(guild: discord.Guild):
 
 
 def has_top_four_role(member: discord.Member):
-    """
-    التحقق من أن العضو يملك واحدة من أعلى 4 رتب.
-    """
 
     if not isinstance(member, discord.Member):
         return False
 
-    top_four = get_top_four_roles(member.guild)
+    top_four = get_top_four_roles(
+        member.guild
+    )
 
-    top_four_ids = {
+    top_ids = {
         role.id
         for role in top_four
     }
 
     return any(
-        role.id in top_four_ids
+        role.id in top_ids
         for role in member.roles
     )
 
 
 def can_control_bot(member: discord.Member):
-    """
-    صلاحية التحكم بالبوت.
-    أعلى 4 رتب فقط.
-    """
 
     if not isinstance(member, discord.Member):
         return False
 
-    # مالك السيرفر مسموح له دائماً
+    # Owner always allowed
     if member.id == member.guild.owner_id:
         return True
 
     return has_top_four_role(member)
 
 
-async def require_bot_control(interaction: discord.Interaction):
-    """
-    التحقق من صلاحية التحكم.
-    """
+async def require_bot_control(
+    interaction: discord.Interaction
+):
 
     if interaction.guild is None:
+
         await interaction.response.send_message(
             "❌ هذا الأمر يعمل داخل السيرفر فقط.",
             ephemeral=True
         )
+
         return False
 
-    member = interaction.user
+    if not can_control_bot(
+        interaction.user
+    ):
 
-    if not can_control_bot(member):
         await interaction.response.send_message(
             "❌ ما عندك صلاحية للتحكم بالبوت.\n"
-            "يجب أن تكون من أصحاب إحدى أعلى 4 رتب في السيرفر.",
+            "لازم تكون من أصحاب إحدى أعلى 4 رتب في السيرفر.",
             ephemeral=True
         )
+
         return False
 
     return True
 
 
 # =========================================================
-# تنظيف المنشن
+# BOT MENTION
 # =========================================================
 
 def clean_bot_mention(content: str):
-    """
-    إزالة منشن البوت من النص.
-    """
 
     if not content:
         return ""
@@ -299,26 +321,22 @@ def clean_bot_mention(content: str):
     return content.strip()
 
 
-# =========================================================
-# اكتشاف الكلام الموجه للبوت
-# =========================================================
-
-def is_directed_to_bot(message: discord.Message):
-    """
-    اكتشاف إذا كان المستخدم يخاطب البوت مباشرة.
-    """
+def is_directed_to_bot(
+    message: discord.Message
+):
 
     if bot.user is None:
         return False
 
-    content = message.content.strip()
-
-    # منشن مباشر
     if bot.user in message.mentions:
         return True
 
-    lowered = content.lower()
+    content = message.content.strip()
 
+    if not content:
+        return False
+
+    lowered = content.lower()
     bot_name = bot.user.name.lower()
 
     patterns = [
@@ -327,65 +345,45 @@ def is_directed_to_bot(message: discord.Message):
         f"{bot_name} ",
         f"{bot_name}:",
         f"{bot_name},",
+        f"hey {bot_name}",
+        f"hello {bot_name}",
     ]
 
-    for pattern in patterns:
-        if pattern in lowered:
-            return True
-
-    return False
-
-
-# =========================================================
-# الحصول على الشخصية النشطة
-# =========================================================
-
-def get_active_character(guild_id: int, config):
-    """
-    جلب الشخصية النشطة من الإعدادات.
-    """
-
-    character_name = None
-
-    if config:
-        character_name = config.get("active_character")
-
-    character = get_character(
-        guild_id,
-        character_name
+    return any(
+        pattern in lowered
+        for pattern in patterns
     )
 
-    return character
-
 
 # =========================================================
-# الرد بالذكاء الاصطناعي
+# NORMAL AI REPLY
 # =========================================================
 
 async def generate_chat_reply(
-    message: discord.Message,
+    message,
     config,
     character,
-    user_message: str
+    user_message
 ):
-    """
-    إنشاء رد AI عادي.
-    """
 
     if not user_message:
         return
 
-    guild_id = message.guild.id
-
     async with message.channel.typing():
 
         response = await ai.generate(
-            guild_id=guild_id,
+            guild_id=message.guild.id,
             user_id=message.author.id,
             character=character,
             user_message=user_message,
-            mode=config.get("mode", "normal"),
-            reply_type=config.get("reply_type", "mention")
+            mode=config.get(
+                "mode",
+                "normal"
+            ),
+            reply_type=config.get(
+                "reply_type",
+                "mention"
+            )
         )
 
     if not response:
@@ -394,56 +392,50 @@ async def generate_chat_reply(
     await send_ai_response(
         message.channel,
         response,
-        reply_to_message=message
+        reply_to=message
     )
 
 
 # =========================================================
-# الوضع التلقائي
+# AUTO AI
 # =========================================================
 
 async def handle_auto_ai(
-    message: discord.Message,
+    message,
     config,
     character
 ):
-    """
-    الوضع التلقائي:
-    - يحسب الرسائل
-    - كل 30 رسالة تقريباً يفحص السيرفر
-    - لا يفحص أكثر من مرة كل 5 دقائق
-    """
 
     guild_id = message.guild.id
     channel_id = message.channel.id
 
-    counter_key = (guild_id, channel_id)
-
-    auto_message_counters[counter_key] = (
-        auto_message_counters.get(counter_key, 0) + 1
+    key = (
+        guild_id,
+        channel_id
     )
 
-    current_count = auto_message_counters[counter_key]
+    auto_message_counters[key] = (
+        auto_message_counters.get(key, 0) + 1
+    )
 
-    # لم يصل إلى عدد الرسائل المطلوب
-    if current_count < AUTO_CHECK_MESSAGE_COUNT:
+    count = auto_message_counters[key]
+
+    if count < AUTO_CHECK_MESSAGE_COUNT:
         return
 
-    # تصفير العداد
-    auto_message_counters[counter_key] = 0
+    auto_message_counters[key] = 0
 
     now = time.time()
 
     last_check = auto_last_check.get(
-        counter_key,
+        key,
         0
     )
 
-    # Cooldown
     if now - last_check < AUTO_COOLDOWN_SECONDS:
         return
 
-    auto_last_check[counter_key] = now
+    auto_last_check[key] = now
 
     try:
 
@@ -460,20 +452,22 @@ async def handle_auto_ai(
 
         await send_ai_response(
             message.channel,
-            "🤖 **تنبيه ذكي للسيرفر**\n" + str(response)
+            "🤖 **تنبيه ذكي للسيرفر**\n"
+            + str(response)
         )
 
     except Exception:
 
         print(
-            f"❌ Auto AI error in guild {guild_id}:"
+            f"❌ Auto AI error "
+            f"in guild {guild_id}"
         )
 
         traceback.print_exc()
 
 
 # =========================================================
-# on_ready
+# READY
 # =========================================================
 
 @bot.event
@@ -485,7 +479,8 @@ async def on_ready():
     )
 
     print(
-        f"🌐 Connected to {len(bot.guilds)} server(s)."
+        f"🌐 Connected to "
+        f"{len(bot.guilds)} server(s)."
     )
 
 
@@ -498,26 +493,27 @@ async def on_ready():
     description="التحدث مع الذكاء الاصطناعي"
 )
 @app_commands.describe(
-    message="رسالتك للذكاء الاصطناعي"
+    message="رسالتك"
 )
 async def ai_command(
     interaction: discord.Interaction,
     message: str
 ):
 
-    if not await require_bot_control(interaction):
-        return
-
-    if interaction.guild is None:
+    if not await require_bot_control(
+        interaction
+    ):
         return
 
     guild_id = interaction.guild.id
 
-    config = get_config(guild_id)
+    config = get_config(
+        guild_id
+    )
 
     if config is None:
         await interaction.response.send_message(
-            "❌ لم يتم إعداد البوت لهذا السيرفر.",
+            "❌ تعذر تحميل إعدادات البوت.",
             ephemeral=True
         )
         return
@@ -529,7 +525,8 @@ async def ai_command(
 
     if character is None:
         await interaction.response.send_message(
-            "❌ لا توجد شخصية AI متاحة.",
+            "❌ لا توجد شخصية AI.\n"
+            "أنشئ شخصية أولاً باستخدام `/character_create`.",
             ephemeral=True
         )
         return
@@ -543,22 +540,30 @@ async def ai_command(
             user_id=interaction.user.id,
             character=character,
             user_message=message,
-            mode=config.get("mode", "normal"),
+            mode=config.get(
+                "mode",
+                "normal"
+            ),
             reply_type="command"
         )
 
         if not response:
+
             await interaction.followup.send(
                 "⚠️ لم يرجع الذكاء الاصطناعي أي رد."
             )
+
             return
 
-        chunks = split_message(response)
+        for chunk in split_message(
+            response
+        ):
 
-        for chunk in chunks:
-            await interaction.followup.send(chunk)
+            await interaction.followup.send(
+                chunk
+            )
 
-    except Exception as error:
+    except Exception:
 
         print("❌ /ai error:")
         traceback.print_exc()
@@ -569,179 +574,290 @@ async def ai_command(
 
 
 # =========================================================
-# /ai_setup
+# SETUP VIEW
 # =========================================================
 
 class SetupView(discord.ui.View):
 
-    def __init__(self, guild_id: int):
-        super().__init__(timeout=300)
+    def __init__(self, guild_id):
+
+        super().__init__(
+            timeout=600
+        )
+
         self.guild_id = guild_id
 
-    async def check_permission(
+    async def permission_check(
         self,
-        interaction: discord.Interaction
+        interaction
     ):
 
         if interaction.guild is None:
             return False
 
-        if not can_control_bot(interaction.user):
+        if not can_control_bot(
+            interaction.user
+        ):
+
             await interaction.response.send_message(
-                "❌ هذه الإعدادات متاحة فقط لأصحاب أعلى 4 رتب.",
+                "❌ هذه الإعدادات لأعلى 4 رتب فقط.",
                 ephemeral=True
             )
+
             return False
 
         return True
 
+    # -----------------------------------------------------
+    # ENABLE
+    # -----------------------------------------------------
+
     @discord.ui.button(
         label="تشغيل",
-        style=discord.ButtonStyle.success
+        style=discord.ButtonStyle.success,
+        emoji="🟢"
     )
-    async def enable_button(
+    async def enable(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
-        if not await self.check_permission(interaction):
+        if not await self.permission_check(
+            interaction
+        ):
             return
 
-        db.update_config(
+        save_config(
             self.guild_id,
             enabled=True
         )
 
         await interaction.response.send_message(
-            "✅ تم تشغيل الذكاء الاصطناعي.",
+            "🟢 تم تشغيل MyAI.",
             ephemeral=True
         )
 
+    # -----------------------------------------------------
+    # DISABLE
+    # -----------------------------------------------------
+
     @discord.ui.button(
         label="إيقاف",
-        style=discord.ButtonStyle.danger
+        style=discord.ButtonStyle.danger,
+        emoji="🔴"
     )
-    async def disable_button(
+    async def disable(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
-        if not await self.check_permission(interaction):
+        if not await self.permission_check(
+            interaction
+        ):
             return
 
-        db.update_config(
+        save_config(
             self.guild_id,
             enabled=False
         )
 
         await interaction.response.send_message(
-            "⛔ تم إيقاف الذكاء الاصطناعي.",
+            "🔴 تم إيقاف MyAI.",
             ephemeral=True
         )
 
+    # -----------------------------------------------------
+    # REPLY TYPE
+    # -----------------------------------------------------
+
     @discord.ui.select(
-        placeholder="اختر نوع الرد",
+        placeholder="اختر نوع الرد...",
+        min_values=1,
+        max_values=1,
         options=[
             discord.SelectOption(
                 label="منشن البوت",
-                description="يرد عندما تعمل منشن للبوت",
-                value="mention"
+                description="يرد فقط عندما تعمل منشن للبوت",
+                value="mention",
+                emoji="🏷️"
             ),
             discord.SelectOption(
                 label="القناة المحددة",
-                description="يرد على الرسائل داخل قناة معينة",
-                value="channel"
+                description="يرد على كل رسالة في قناة محددة",
+                value="channel",
+                emoji="💬"
             ),
             discord.SelectOption(
                 label="الرد المباشر",
-                description="يتعرف عندما تخاطب البوت مباشرة",
-                value="direct"
+                description="يرد عندما تخاطبه مباشرة",
+                value="direct",
+                emoji="🎯"
             ),
             discord.SelectOption(
                 label="الوضع التلقائي",
-                description="يراقب المحادثة ويقدم تنبيهات ذكية",
-                value="auto"
+                description="يراقب المحادثة ويقدم تنبيهات",
+                value="auto",
+                emoji="🤖"
             )
         ]
     )
-    async def reply_type_select(
+    async def reply_type(
         self,
-        interaction: discord.Interaction,
-        select: discord.ui.Select
+        interaction,
+        select
     ):
 
-        if not await self.check_permission(interaction):
+        if not await self.permission_check(
+            interaction
+        ):
             return
 
-        reply_type = select.values[0]
+        value = select.values[0]
 
-        db.update_config(
+        save_config(
             self.guild_id,
-            reply_type=reply_type
+            reply_type=value
         )
 
         names = {
-            "mention": "منشن البوت",
-            "channel": "القناة المحددة",
-            "direct": "الرد المباشر",
-            "auto": "الوضع التلقائي"
+            "mention": "🏷️ منشن البوت",
+            "channel": "💬 القناة المحددة",
+            "direct": "🎯 الرد المباشر",
+            "auto": "🤖 الوضع التلقائي"
         }
 
         await interaction.response.send_message(
-            f"✅ تم اختيار نوع الرد: **{names.get(reply_type, reply_type)}**",
+            f"✅ تم اختيار: **{names[value]}**",
+            ephemeral=True
+        )
+
+    # -----------------------------------------------------
+    # CHANNEL
+    # -----------------------------------------------------
+
+    @discord.ui.channel_select(
+        placeholder="اختر قناة الرد...",
+        channel_types=[
+            discord.ChannelType.text
+        ],
+        min_values=1,
+        max_values=1
+    )
+    async def channel_select(
+        self,
+        interaction,
+        select
+    ):
+
+        if not await self.permission_check(
+            interaction
+        ):
+            return
+
+        channel = select.values[0]
+
+        save_config(
+            self.guild_id,
+            channel_id=channel.id
+        )
+
+        await interaction.response.send_message(
+            f"✅ تم تحديد قناة الرد: {channel.mention}",
             ephemeral=True
         )
 
 
+# =========================================================
+# /ai_setup
+# =========================================================
+
 @bot.tree.command(
     name="ai_setup",
-    description="إعداد الذكاء الاصطناعي"
+    description="إعداد MyAI"
 )
 async def ai_setup(
     interaction: discord.Interaction
 ):
 
-    if not await require_bot_control(interaction):
+    if not await require_bot_control(
+        interaction
+    ):
         return
 
     guild_id = interaction.guild.id
 
-    config = get_config(guild_id)
-
-    if config is None:
-        db.create_config(guild_id)
-        config = get_config(guild_id)
+    config = get_config(
+        guild_id
+    )
 
     if config is None:
         await interaction.response.send_message(
-            "❌ تعذر إنشاء إعدادات السيرفر.",
+            "❌ تعذر تحميل إعدادات البوت.",
             ephemeral=True
         )
         return
 
+    reply_type = config.get(
+        "reply_type",
+        "mention"
+    )
+
+    reply_names = {
+        "mention": "🏷️ منشن البوت",
+        "channel": "💬 القناة المحددة",
+        "direct": "🎯 الرد المباشر",
+        "auto": "🤖 الوضع التلقائي"
+    }
+
+    enabled = bool(
+        config.get(
+            "enabled",
+            0
+        )
+    )
+
+    channel_id = config.get(
+        "channel_id"
+    )
+
+    if channel_id:
+        channel_text = f"<#{channel_id}>"
+    else:
+        channel_text = "غير محددة"
+
+    character_name = config.get(
+        "character_name"
+    )
+
+    if not character_name:
+        character_name = "تلقائي"
+
     embed = discord.Embed(
-        title="🤖 إعدادات MyAI",
-        description="تحكم في طريقة عمل الذكاء الاصطناعي.",
+        title="🤖 MyAI — لوحة الإعدادات",
+        description=(
+            "تحكم في طريقة عمل الذكاء الاصطناعي "
+            "داخل السيرفر."
+        ),
         color=discord.Color.blurple()
     )
 
-    enabled = config.get("enabled", False)
-
     embed.add_field(
         name="الحالة",
-        value="🟢 يعمل" if enabled else "🔴 متوقف",
+        value=(
+            "🟢 يعمل"
+            if enabled
+            else "🔴 متوقف"
+        ),
         inline=True
     )
 
     embed.add_field(
-        name="الشخصية",
-        value=str(
-            config.get(
-                "active_character",
-                "MyAI"
-            )
+        name="نوع الرد",
+        value=reply_names.get(
+            reply_type,
+            reply_type
         ),
         inline=True
     )
@@ -758,22 +874,12 @@ async def ai_setup(
     )
 
     embed.add_field(
-        name="نوع الرد",
+        name="الشخصية",
         value=str(
-            config.get(
-                "reply_type",
-                "mention"
-            )
+            character_name
         ),
         inline=True
     )
-
-    channel_id = config.get("channel_id")
-
-    if channel_id:
-        channel_text = f"<#{channel_id}>"
-    else:
-        channel_text = "غير محددة"
 
     embed.add_field(
         name="القناة",
@@ -781,8 +887,14 @@ async def ai_setup(
         inline=True
     )
 
+    embed.add_field(
+        name="الصلاحيات",
+        value="أعلى 4 رتب",
+        inline=True
+    )
+
     embed.set_footer(
-        text="التحكم متاح لأعلى 4 رتب في السيرفر."
+        text="MyAI"
     )
 
     await interaction.response.send_message(
@@ -802,25 +914,26 @@ async def ai_setup(
 )
 @app_commands.describe(
     name="اسم الشخصية",
-    prompt="وصف الشخصية وسلوكها"
+    prompt="شخصية وسلوك الذكاء الاصطناعي"
 )
 async def character_create(
-    interaction: discord.Interaction,
+    interaction,
     name: str,
     prompt: str
 ):
 
-    if not await require_bot_control(interaction):
+    if not await require_bot_control(
+        interaction
+    ):
         return
-
-    guild_id = interaction.guild.id
 
     try:
 
         db.create_character(
-            guild_id,
+            interaction.guild.id,
             name,
-            prompt
+            prompt,
+            created_by=interaction.user.id
         )
 
         await interaction.response.send_message(
@@ -828,13 +941,13 @@ async def character_create(
             ephemeral=True
         )
 
-    except Exception:
+    except Exception as error:
 
         print("❌ character_create error:")
         traceback.print_exc()
 
         await interaction.response.send_message(
-            "❌ تعذر إنشاء الشخصية.",
+            f"❌ تعذر إنشاء الشخصية: {error}",
             ephemeral=True
         )
 
@@ -848,39 +961,56 @@ async def character_create(
     description="عرض شخصيات AI"
 )
 async def character_list(
-    interaction: discord.Interaction
+    interaction
 ):
 
-    if not await require_bot_control(interaction):
+    if not await require_bot_control(
+        interaction
+    ):
         return
-
-    guild_id = interaction.guild.id
 
     try:
 
-        characters = db.list_characters(guild_id)
+        characters = db.get_characters(
+            interaction.guild.id
+        )
 
         if not characters:
+
             await interaction.response.send_message(
                 "📭 لا توجد شخصيات.",
                 ephemeral=True
             )
+
             return
 
         lines = []
 
+        config = get_config(
+            interaction.guild.id
+        )
+
+        active = config.get(
+            "character_name"
+        ) if config else None
+
         for character in characters:
 
-            character = row_to_dict(character)
+            character = dict(character)
 
             name = character.get(
                 "name",
                 "بدون اسم"
             )
 
-            lines.append(
-                f"• **{name}**"
-            )
+            if name == active:
+                lines.append(
+                    f"🟢 **{name}** — نشطة"
+                )
+            else:
+                lines.append(
+                    f"⚪ **{name}**"
+                )
 
         await interaction.response.send_message(
             "🤖 **الشخصيات:**\n\n"
@@ -911,11 +1041,13 @@ async def character_list(
     name="اسم الشخصية"
 )
 async def character_use(
-    interaction: discord.Interaction,
+    interaction,
     name: str
 ):
 
-    if not await require_bot_control(interaction):
+    if not await require_bot_control(
+        interaction
+    ):
         return
 
     guild_id = interaction.guild.id
@@ -926,21 +1058,35 @@ async def character_use(
     )
 
     if character is None:
+
         await interaction.response.send_message(
             f"❌ الشخصية **{name}** غير موجودة.",
             ephemeral=True
         )
+
         return
 
-    db.update_config(
-        guild_id,
-        active_character=name
-    )
+    try:
 
-    await interaction.response.send_message(
-        f"✅ أصبحت الشخصية **{name}** هي الشخصية النشطة.",
-        ephemeral=True
-    )
+        save_config(
+            guild_id,
+            character_name=name
+        )
+
+        await interaction.response.send_message(
+            f"✅ أصبحت **{name}** الشخصية النشطة.",
+            ephemeral=True
+        )
+
+    except Exception:
+
+        print("❌ character_use error:")
+        traceback.print_exc()
+
+        await interaction.response.send_message(
+            "❌ تعذر اختيار الشخصية.",
+            ephemeral=True
+        )
 
 
 # =========================================================
@@ -949,44 +1095,35 @@ async def character_use(
 
 @bot.tree.command(
     name="ai_status",
-    description="عرض حالة الذكاء الاصطناعي"
+    description="عرض حالة MyAI"
 )
 async def ai_status(
-    interaction: discord.Interaction
+    interaction
 ):
 
-    if not await require_bot_control(interaction):
+    if not await require_bot_control(
+        interaction
+    ):
         return
 
-    guild_id = interaction.guild.id
-
-    config = get_config(guild_id)
+    config = get_config(
+        interaction.guild.id
+    )
 
     if config is None:
+
         await interaction.response.send_message(
-            "❌ لا توجد إعدادات.",
+            "❌ تعذر تحميل الإعدادات.",
             ephemeral=True
         )
+
         return
 
-    enabled = config.get(
-        "enabled",
-        False
-    )
-
-    reply_type = config.get(
-        "reply_type",
-        "mention"
-    )
-
-    mode = config.get(
-        "mode",
-        "normal"
-    )
-
-    character = config.get(
-        "active_character",
-        "MyAI"
+    enabled = bool(
+        config.get(
+            "enabled",
+            0
+        )
     )
 
     embed = discord.Embed(
@@ -1000,25 +1137,58 @@ async def ai_status(
 
     embed.add_field(
         name="الحالة",
-        value="🟢 يعمل" if enabled else "🔴 متوقف",
-        inline=True
-    )
-
-    embed.add_field(
-        name="الشخصية",
-        value=str(character),
-        inline=True
-    )
-
-    embed.add_field(
-        name="النمط",
-        value=str(mode),
+        value=(
+            "🟢 يعمل"
+            if enabled
+            else "🔴 متوقف"
+        ),
         inline=True
     )
 
     embed.add_field(
         name="نوع الرد",
-        value=str(reply_type),
+        value=str(
+            config.get(
+                "reply_type",
+                "mention"
+            )
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="النمط",
+        value=str(
+            config.get(
+                "mode",
+                "normal"
+            )
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="الشخصية",
+        value=str(
+            config.get(
+                "character_name"
+            )
+            or "تلقائي"
+        ),
+        inline=True
+    )
+
+    channel_id = config.get(
+        "channel_id"
+    )
+
+    embed.add_field(
+        name="القناة",
+        value=(
+            f"<#{channel_id}>"
+            if channel_id
+            else "غير محددة"
+        ),
         inline=True
     )
 
@@ -1034,23 +1204,25 @@ async def ai_status(
 
 @bot.tree.command(
     name="ai_memory_clear",
-    description="مسح ذاكرة المحادثة"
+    description="مسح ذاكرة AI"
 )
 async def ai_memory_clear(
-    interaction: discord.Interaction
+    interaction
 ):
 
-    if not await require_bot_control(interaction):
+    if not await require_bot_control(
+        interaction
+    ):
         return
-
-    guild_id = interaction.guild.id
 
     try:
 
-        db.clear_history(guild_id)
+        db.clear_history(
+            interaction.guild.id
+        )
 
         await interaction.response.send_message(
-            "🧹 تم مسح ذاكرة الذكاء الاصطناعي.",
+            "🧹 تم مسح ذاكرة المحادثة.",
             ephemeral=True
         )
 
@@ -1066,66 +1238,55 @@ async def ai_memory_clear(
 
 
 # =========================================================
-# on_message
+# ON MESSAGE
 # =========================================================
 
 @bot.event
-async def on_message(message: discord.Message):
+async def on_message(
+    message: discord.Message
+):
 
     # تجاهل البوتات
     if message.author.bot:
         return
 
-    # تجاهل الرسائل الخاصة
-    if message.guild is None:
-        await bot.process_commands(message)
-        return
+    # أوامر prefix
+    await bot.process_commands(
+        message
+    )
 
-    # مهم جداً:
-    # نخلي أوامر prefix تشتغل أيضاً
-    await bot.process_commands(message)
+    # الرسائل الخاصة
+    if message.guild is None:
+        return
 
     guild_id = message.guild.id
 
-    # -----------------------------------------------------
-    # جلب الإعدادات
-    # -----------------------------------------------------
+    # =====================================================
+    # LOAD CONFIG
+    # =====================================================
 
-    try:
-        config = get_config(guild_id)
-    except Exception:
-        print("❌ Failed to load guild config:")
-        traceback.print_exc()
-        return
+    config = get_config(
+        guild_id
+    )
 
     if config is None:
         return
 
-    # -----------------------------------------------------
-    # إذا البوت متوقف
-    # -----------------------------------------------------
+    # =====================================================
+    # ENABLED
+    # =====================================================
 
-    if not config.get("enabled", False):
+    if not bool(
+        config.get(
+            "enabled",
+            0
+        )
+    ):
         return
 
-    # -----------------------------------------------------
-    # نوع الرد
-    # -----------------------------------------------------
-
-    reply_type = str(
-        config.get(
-            "reply_type",
-            "mention"
-        )
-    ).lower().strip()
-
-    # دعم أسماء قديمة
-    if reply_type == "command":
-        reply_type = "mention"
-
-    # -----------------------------------------------------
-    # الشخصية
-    # -----------------------------------------------------
+    # =====================================================
+    # CHARACTER
+    # =====================================================
 
     character = get_active_character(
         guild_id,
@@ -1136,7 +1297,18 @@ async def on_message(message: discord.Message):
         return
 
     # =====================================================
-    # 1 — Mention
+    # REPLY TYPE
+    # =====================================================
+
+    reply_type = str(
+        config.get(
+            "reply_type",
+            "mention"
+        )
+    ).lower().strip()
+
+    # =====================================================
+    # 1. MENTION
     # =====================================================
 
     if reply_type == "mention":
@@ -1151,7 +1323,6 @@ async def on_message(message: discord.Message):
             message.content
         )
 
-        # لو فقط منشن بدون كلام
         if not user_message:
             user_message = "السلام عليكم"
 
@@ -1176,29 +1347,31 @@ async def on_message(message: discord.Message):
         return
 
     # =====================================================
-    # 2 — Channel
+    # 2. CHANNEL
     # =====================================================
 
     if reply_type == "channel":
 
-        configured_channel_id = config.get(
+        configured_channel = config.get(
             "channel_id"
         )
 
-        if not configured_channel_id:
+        if not configured_channel:
             return
 
         try:
-            configured_channel_id = int(
-                configured_channel_id
+            configured_channel = int(
+                configured_channel
             )
         except Exception:
             return
 
-        if message.channel.id != configured_channel_id:
+        if message.channel.id != configured_channel:
             return
 
-        if not message.content.strip():
+        content = message.content.strip()
+
+        if not content:
             return
 
         try:
@@ -1207,7 +1380,7 @@ async def on_message(message: discord.Message):
                 message,
                 config,
                 character,
-                message.content.strip()
+                content
             )
 
         except Exception:
@@ -1222,12 +1395,14 @@ async def on_message(message: discord.Message):
         return
 
     # =====================================================
-    # 3 — Direct
+    # 3. DIRECT
     # =====================================================
 
     if reply_type == "direct":
 
-        if not is_directed_to_bot(message):
+        if not is_directed_to_bot(
+            message
+        ):
             return
 
         user_message = clean_bot_mention(
@@ -1261,7 +1436,7 @@ async def on_message(message: discord.Message):
         return
 
     # =====================================================
-    # 4 — Auto
+    # 4. AUTO
     # =====================================================
 
     if reply_type == "auto":
@@ -1287,7 +1462,7 @@ async def on_message(message: discord.Message):
 
 
 # =========================================================
-# معالجة أخطاء Slash Commands
+# SLASH COMMAND ERROR
 # =========================================================
 
 @bot.tree.error
@@ -1324,10 +1499,11 @@ async def on_app_command_error(
 
 
 # =========================================================
-# تشغيل البوت
+# START
 # =========================================================
 
 if not TOKEN:
+
     raise RuntimeError(
         "❌ DISCORD_TOKEN غير موجود في Environment Variables."
     )
