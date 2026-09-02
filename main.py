@@ -1,4 +1,3 @@
-```python
 import os
 import re
 import time
@@ -2456,4 +2455,3 @@ if not TOKEN:
 
 
 bot.run(TOKEN)
-```
