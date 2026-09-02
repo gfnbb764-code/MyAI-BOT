@@ -19,6 +19,7 @@ class Database:
 
         self._create_tables()
         self._repair_messages_table()
+        self._repair_settings_tables()
         self._migrate_old_models()
 
     # ==========================================================
@@ -53,6 +54,7 @@ class Database:
             except Exception:
                 if commit:
                     self.conn.rollback()
+
                 raise
 
     # ==========================================================
@@ -62,6 +64,7 @@ class Database:
     def _create_tables(self):
 
         with self.lock:
+
             cursor = self.conn.cursor()
 
             cursor.execute("""
@@ -174,8 +177,6 @@ class Database:
                 "created_at"
             }
 
-            # إذا الجدول ناقص أعمدة أساسية،
-            # نعيد بناءه بشكل آمن.
             if not required.issubset(column_names):
 
                 cursor.execute("""
@@ -203,14 +204,16 @@ class Database:
                     ).fetchall()
                 }
 
-                if {
+                required_old = {
                     "guild_id",
                     "channel_id",
                     "user_id",
                     "character_name",
                     "role",
                     "content"
-                }.issubset(old_columns):
+                }
+
+                if required_old.issubset(old_columns):
 
                     created_expr = (
                         "created_at"
@@ -246,7 +249,6 @@ class Database:
                     DROP TABLE messages_old
                 """)
 
-            # إصلاح أي created_at NULL في البيانات القديمة
             cursor.execute("""
                 UPDATE messages
                 SET created_at = CURRENT_TIMESTAMP
@@ -266,6 +268,212 @@ class Database:
             """)
 
             self.conn.commit()
+
+    # ==========================================================
+    # REPAIR OLD SETTINGS TABLES
+    # ==========================================================
+
+    def _repair_settings_tables(self):
+
+        with self.lock:
+
+            cursor = self.conn.cursor()
+
+            # --------------------------------------------------
+            # guild_settings
+            # --------------------------------------------------
+
+            cursor.execute("""
+                PRAGMA table_info(guild_settings)
+            """)
+
+            columns = cursor.fetchall()
+
+            guild_columns = {
+                row["name"]
+                for row in columns
+            }
+
+            guild_missing = {
+                "active_character": "TEXT",
+                "active_provider": "TEXT DEFAULT 'google'",
+                "active_model": "TEXT DEFAULT 'gemini-3.6-flash'",
+                "ai_enabled": "INTEGER DEFAULT 0",
+                "ai_channel_id": "INTEGER",
+                "ai_mode": "TEXT DEFAULT 'normal'",
+                "reply_type": "TEXT DEFAULT 'mention'",
+                "permission_preset": "TEXT DEFAULT 'chat'",
+                "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            }
+
+            for column_name, definition in guild_missing.items():
+
+                if column_name not in guild_columns:
+
+                    cursor.execute(
+                        f"""
+                        ALTER TABLE guild_settings
+                        ADD COLUMN {column_name} {definition}
+                        """
+                    )
+
+                    print(
+                        f"🔧 تمت إضافة العمود "
+                        f"guild_settings.{column_name}"
+                    )
+
+            # --------------------------------------------------
+            # ai_config
+            # --------------------------------------------------
+
+            cursor.execute("""
+                PRAGMA table_info(ai_config)
+            """)
+
+            columns = cursor.fetchall()
+
+            ai_columns = {
+                row["name"]
+                for row in columns
+            }
+
+            ai_missing = {
+                "enabled": "INTEGER DEFAULT 0",
+                "channel_id": "INTEGER",
+                "mode": "TEXT DEFAULT 'normal'",
+                "reply_type": "TEXT DEFAULT 'mention'",
+                "character_name": "TEXT",
+                "permission_preset": "TEXT DEFAULT 'chat'",
+                "provider": "TEXT DEFAULT 'google'",
+                "model": "TEXT DEFAULT 'gemini-3.6-flash'",
+                "allow_management": "INTEGER DEFAULT 0",
+                "allow_channel_management": "INTEGER DEFAULT 0",
+                "allow_role_management": "INTEGER DEFAULT 0",
+                "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            }
+
+            for column_name, definition in ai_missing.items():
+
+                if column_name not in ai_columns:
+
+                    cursor.execute(
+                        f"""
+                        ALTER TABLE ai_config
+                        ADD COLUMN {column_name} {definition}
+                        """
+                    )
+
+                    print(
+                        f"🔧 تمت إضافة العمود "
+                        f"ai_config.{column_name}"
+                    )
+
+            # --------------------------------------------------
+            # إصلاح القيم القديمة
+            # --------------------------------------------------
+
+            cursor.execute("""
+                UPDATE guild_settings
+                SET active_provider = 'google'
+                WHERE active_provider IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE guild_settings
+                SET active_model = ?
+                WHERE active_model IS NULL
+                   OR active_model = ''
+            """, (
+                self.CURRENT_GOOGLE_MODEL,
+            ))
+
+            cursor.execute("""
+                UPDATE guild_settings
+                SET ai_enabled = 0
+                WHERE ai_enabled IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE guild_settings
+                SET ai_mode = 'normal'
+                WHERE ai_mode IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE guild_settings
+                SET reply_type = 'mention'
+                WHERE reply_type IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE guild_settings
+                SET permission_preset = 'chat'
+                WHERE permission_preset IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE ai_config
+                SET provider = 'google'
+                WHERE provider IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE ai_config
+                SET model = ?
+                WHERE model IS NULL
+                   OR model = ''
+            """, (
+                self.CURRENT_GOOGLE_MODEL,
+            ))
+
+            cursor.execute("""
+                UPDATE ai_config
+                SET enabled = 0
+                WHERE enabled IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE ai_config
+                SET mode = 'normal'
+                WHERE mode IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE ai_config
+                SET reply_type = 'mention'
+                WHERE reply_type IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE ai_config
+                SET permission_preset = 'chat'
+                WHERE permission_preset IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE ai_config
+                SET allow_management = 0
+                WHERE allow_management IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE ai_config
+                SET allow_channel_management = 0
+                WHERE allow_channel_management IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE ai_config
+                SET allow_role_management = 0
+                WHERE allow_role_management IS NULL
+            """)
+
+            self.conn.commit()
+
+            print(
+                "✅ تم فحص وإصلاح جداول إعدادات MyAI."
+            )
 
     # ==========================================================
     # MODEL MIGRATION
@@ -355,28 +563,36 @@ class Database:
 
         if provider == "google":
 
-            model = model or self.CURRENT_GOOGLE_MODEL
+            model = (
+                model
+                or self.CURRENT_GOOGLE_MODEL
+            )
 
             if model == "gemini-2.5-flash":
                 model = self.CURRENT_GOOGLE_MODEL
 
         else:
+
             model = model or ""
 
         if not name:
+
             raise ValueError(
                 "اسم الشخصية لا يمكن أن يكون فارغًا."
             )
 
         if len(name) > 50:
+
             raise ValueError(
                 "اسم الشخصية طويل جدًا."
             )
 
         if not personality:
+
             personality = "شخصية ودودة ومفيدة."
 
         if len(personality) > 2000:
+
             raise ValueError(
                 "وصف الشخصية طويل جدًا."
             )
@@ -458,6 +674,7 @@ class Database:
         )
 
         if not character:
+
             raise ValueError(
                 "الشخصية غير موجودة."
             )
@@ -488,7 +705,10 @@ class Database:
                 not new_model
                 or new_model == "gemini-2.5-flash"
             ):
-                new_model = self.CURRENT_GOOGLE_MODEL
+
+                new_model = (
+                    self.CURRENT_GOOGLE_MODEL
+                )
 
         self._execute("""
             UPDATE characters
@@ -603,7 +823,9 @@ class Database:
                 guild_id
             ), commit=True)
 
-            data["model"] = self.CURRENT_GOOGLE_MODEL
+            data["model"] = (
+                self.CURRENT_GOOGLE_MODEL
+            )
 
         return data
 
@@ -628,6 +850,7 @@ class Database:
         )
 
         def value(new, old):
+
             return old if new is None else new
 
         enabled = value(
@@ -695,7 +918,10 @@ class Database:
                 not model
                 or model == "gemini-2.5-flash"
             ):
-                model = self.CURRENT_GOOGLE_MODEL
+
+                model = (
+                    self.CURRENT_GOOGLE_MODEL
+                )
 
         self._execute("""
             INSERT INTO ai_config (
@@ -784,25 +1010,45 @@ class Database:
     # QUICK SETTINGS
     # ==========================================================
 
-    def set_ai_enabled(self, guild_id, enabled):
+    def set_ai_enabled(
+        self,
+        guild_id,
+        enabled
+    ):
+
         return self.save_ai_config(
             guild_id,
             enabled=enabled
         )
 
-    def set_ai_channel(self, guild_id, channel_id):
+    def set_ai_channel(
+        self,
+        guild_id,
+        channel_id
+    ):
+
         return self.save_ai_config(
             guild_id,
             channel_id=channel_id
         )
 
-    def set_ai_mode(self, guild_id, mode):
+    def set_ai_mode(
+        self,
+        guild_id,
+        mode
+    ):
+
         return self.save_ai_config(
             guild_id,
             mode=mode
         )
 
-    def set_reply_type(self, guild_id, reply_type):
+    def set_reply_type(
+        self,
+        guild_id,
+        reply_type
+    ):
+
         return self.save_ai_config(
             guild_id,
             reply_type=reply_type
@@ -820,6 +1066,7 @@ class Database:
         )
 
         if not character:
+
             raise ValueError(
                 "الشخصية غير موجودة."
             )
@@ -843,13 +1090,13 @@ class Database:
         content
     ):
 
-        content = str(content).strip()
+        content = str(
+            content
+        ).strip()
 
         if not content:
             return
 
-        # مهم جدًا:
-        # يتم إرسال created_at صراحةً.
         self._execute("""
             INSERT INTO messages (
                 guild_id,
@@ -882,8 +1129,13 @@ class Database:
     ):
 
         try:
-            limit = int(limit)
+
+            limit = int(
+                limit
+            )
+
         except Exception:
+
             limit = 20
 
         limit = max(
@@ -1019,8 +1271,17 @@ class Database:
         ), fetchone=True)
 
         return {
-            "messages": messages["count"] if messages else 0,
-            "characters": characters["count"] if characters else 0
+            "messages": (
+                messages["count"]
+                if messages
+                else 0
+            ),
+
+            "characters": (
+                characters["count"]
+                if characters
+                else 0
+            )
         }
 
     # ==========================================================
@@ -1068,4 +1329,3 @@ class Database:
 
                 self.conn.commit()
                 self.conn.close()
-                self.conn = None
