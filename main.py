@@ -1,3 +1,4 @@
+```python
 import os
 import re
 import time
@@ -51,10 +52,7 @@ ai = AIEngine(db)
 auto_message_counters = {}
 auto_last_check = {}
 
-# عدد ردود MyAI المتتالية على البوتات
 bot_chat_reply_counts = {}
-
-# آخر مرة رد فيها MyAI على بوت في كل روم
 bot_chat_last_reply = {}
 
 
@@ -354,10 +352,6 @@ async def send_ai_response(
     if not chunks:
         return
 
-    # =====================================================
-    # أول جزء = REPLY على الرسالة الأصلية
-    # =====================================================
-
     try:
 
         await message.reply(
@@ -378,10 +372,6 @@ async def send_ai_response(
         traceback.print_exc()
 
         return
-
-    # =====================================================
-    # الأجزاء الإضافية
-    # =====================================================
 
     for chunk in chunks[1:]:
 
@@ -516,11 +506,9 @@ def is_directed_to_bot(
     if bot.user is None:
         return False
 
-    # Mention
     if bot.user in message.mentions:
         return True
 
-    # Reply to MyAI
     referenced_message = getattr(
         message,
         "reference",
@@ -631,20 +619,33 @@ async def generate_chat_reply(
     user_message
 ):
 
-    provider = config.get(
-        "provider"
-    )
+    # -----------------------------------------------------
+    # IMPORTANT:
+    # provider/model are intentionally fixed here.
+    #
+    # reply_type controls HOW the bot responds.
+    # It must NOT be used as the AI mode.
+    # -----------------------------------------------------
 
-    model = config.get(
-        "model"
-    )
+    provider = "openai"
+    model = "gpt-5.6-luna"
 
     mode = str(
         config.get(
-            "reply_type",
-            "direct"
+            "mode",
+            "normal"
         )
-    )
+    ).lower().strip()
+
+    if mode not in {
+        "normal",
+        "friendly",
+        "active",
+        "fun",
+        "professional"
+    }:
+
+        mode = "normal"
 
     character_name = character.get(
         "name"
@@ -763,12 +764,8 @@ async def handle_auto_ai(
         character_name=character.get(
             "name"
         ),
-        provider=config.get(
-            "provider"
-        ),
-        model=config.get(
-            "model"
-        )
+        provider="openai",
+        model="gpt-5.6-luna"
     )
 
     if not response:
@@ -937,10 +934,6 @@ async def on_message(
     message: discord.Message
 ):
 
-    # =====================================================
-    # 📩 FULL MESSAGE LOG
-    # =====================================================
-
     try:
 
         author_name = str(
@@ -1009,10 +1002,6 @@ async def on_message(
             f"⚠️ Message logger error: {e}"
         )
 
-    # =====================================================
-    # IGNORE DMS
-    # =====================================================
-
     if message.guild is None:
 
         print(
@@ -1022,10 +1011,6 @@ async def on_message(
         return
 
     guild_id = message.guild.id
-
-    # =====================================================
-    # LOAD CONFIG EARLY
-    # =====================================================
 
     config = get_config(
         guild_id
@@ -1051,10 +1036,6 @@ async def on_message(
         )
     ).lower().strip()
 
-    # =====================================================
-    # IGNORE MYAI ITSELF
-    # =====================================================
-
     if (
         bot.user is not None
         and message.author.id == bot.user.id
@@ -1065,10 +1046,6 @@ async def on_message(
         )
 
         return
-
-    # =====================================================
-    # PROCESS PREFIX COMMANDS
-    # =====================================================
 
     try:
 
@@ -1084,10 +1061,6 @@ async def on_message(
 
         traceback.print_exc()
 
-    # =====================================================
-    # ENABLED
-    # =====================================================
-
     print(
         f"🏠 Guild detected: {guild_id}"
     )
@@ -1098,8 +1071,9 @@ async def on_message(
         f"reply_type={reply_type} | "
         f"channel_id={config.get('channel_id')} | "
         f"character={config.get('character_name')} | "
-        f"provider={config.get('provider')} | "
-        f"model={config.get('model')}"
+        f"provider=OpenAI | "
+        f"model=gpt-5.6-luna | "
+        f"mode={config.get('mode', 'normal')}"
     )
 
     if not bool(
@@ -1118,10 +1092,6 @@ async def on_message(
     print(
         "🟢 AI is enabled."
     )
-
-    # =====================================================
-    # CHARACTER
-    # =====================================================
 
     character = get_active_character(
         guild_id,
@@ -1145,10 +1115,6 @@ async def on_message(
     print(
         f"🎯 Reply type: {reply_type}"
     )
-
-    # =====================================================
-    # BOT MESSAGE INFORMATION
-    # =====================================================
 
     is_bot_message = getattr(
         message.author,
@@ -1190,12 +1156,6 @@ async def on_message(
         if not user_message:
 
             user_message = "السلام عليكم"
-
-        print(
-            "🚀 Sending mention "
-            "message to AI: "
-            f"{user_message!r}"
-        )
 
         try:
 
@@ -1281,16 +1241,6 @@ async def on_message(
 
             return
 
-        print(
-            "🎯 CHANNEL MATCHED!"
-        )
-
-        print(
-            "🚀 Sending channel "
-            "message to AI: "
-            f"{content!r}"
-        )
-
         try:
 
             await generate_chat_reply(
@@ -1358,12 +1308,6 @@ async def on_message(
 
             return
 
-        print(
-            "🚀 Sending direct "
-            "message to AI: "
-            f"{user_message!r}"
-        )
-
         try:
 
             await generate_chat_reply(
@@ -1394,7 +1338,6 @@ async def on_message(
 
     if reply_type == "auto":
 
-        # Auto = البشر فقط
         if is_bot_message:
 
             print(
@@ -1437,10 +1380,6 @@ async def on_message(
 
     if reply_type == "bot_chat":
 
-        # =================================================
-        # OTHER BOTS
-        # =================================================
-
         if is_bot_message:
 
             print(
@@ -1466,12 +1405,6 @@ async def on_message(
                 )
 
                 return
-
-            print(
-                "🤖 BOT CHAT INPUT | "
-                f"sender={message.author} | "
-                f"message={user_message!r}"
-            )
 
             try:
 
@@ -1499,10 +1432,6 @@ async def on_message(
                 traceback.print_exc()
 
             return
-
-        # =================================================
-        # HUMAN
-        # =================================================
 
         print(
             "👤 BOT CHAT | "
@@ -1545,12 +1474,6 @@ async def on_message(
 
             return
 
-        print(
-            "🚀 Sending Bot Chat human "
-            "message to AI: "
-            f"{user_message!r}"
-        )
-
         try:
 
             await generate_chat_reply(
@@ -1574,10 +1497,6 @@ async def on_message(
             traceback.print_exc()
 
         return
-
-    # =====================================================
-    # UNKNOWN TYPE
-    # =====================================================
 
     print(
         "⚠️ Unknown reply_type: "
@@ -1648,11 +1567,32 @@ async def ai_command(
             "name"
         )
 
+        provider = "openai"
+        model = "gpt-5.6-luna"
+
+        mode = str(
+            config.get(
+                "mode",
+                "normal"
+            )
+        ).lower().strip()
+
+        if mode not in {
+            "normal",
+            "friendly",
+            "active",
+            "fun",
+            "professional"
+        }:
+
+            mode = "normal"
+
         print(
             "🧠 /ai REQUEST | "
             f"character={character_name} | "
-            f"provider={config.get('provider')} | "
-            f"model={config.get('model')}"
+            f"provider={provider} | "
+            f"model={model} | "
+            f"mode={mode}"
         )
 
         response = await ai.generate(
@@ -1661,15 +1601,9 @@ async def ai_command(
             user_id=interaction.user.id,
             character_name=character_name,
             user_message=message,
-            provider=config.get(
-                "provider"
-            ),
-            model=config.get(
-                "model"
-            ),
-            mode=config.get(
-                "reply_type"
-            )
+            provider=provider,
+            model=model,
+            mode=mode
         )
 
         if not response:
@@ -2091,6 +2025,18 @@ async def ai_setup(
         inline=True
     )
 
+    embed.add_field(
+        name="Provider",
+        value="OpenAI",
+        inline=True
+    )
+
+    embed.add_field(
+        name="Model",
+        value="gpt-5.6-luna",
+        inline=True
+    )
+
     await interaction.response.send_message(
         embed=embed,
         view=SetupView(
@@ -2415,21 +2361,22 @@ async def ai_status(
 
     embed.add_field(
         name="Provider",
-        value=str(
-            config.get(
-                "provider",
-                "default"
-            )
-        ),
+        value="OpenAI",
         inline=True
     )
 
     embed.add_field(
         name="Model",
+        value="gpt-5.6-luna",
+        inline=True
+    )
+
+    embed.add_field(
+        name="Mode",
         value=str(
             config.get(
-                "model",
-                "default"
+                "mode",
+                "normal"
             )
         ),
         inline=True
@@ -2509,3 +2456,4 @@ if not TOKEN:
 
 
 bot.run(TOKEN)
+```
