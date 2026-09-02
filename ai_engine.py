@@ -1,22 +1,64 @@
+```python
 import os
 import asyncio
 import aiohttp
 
 
+# ============================================================
+# DEFAULT CONFIG
+# ============================================================
+
 DEFAULT_PROVIDER = os.getenv(
     "PRIMARY_AI_PROVIDER",
-    "google"
+    "openai"
 ).lower()
 
 
 DEFAULT_MODELS = {
-    "google": "gemini-3.6-flash",
-    "openai": "gpt-5.6-luna",
-    "anthropic": "claude-sonnet-4-6",
+    "openai": os.getenv(
+        "OPENAI_MODEL",
+        "gpt-5.6-luna"
+    ),
+
+    "google": os.getenv(
+        "GOOGLE_MODEL",
+        "gemini-3.6-flash"
+    ),
+
+    "anthropic": os.getenv(
+        "ANTHROPIC_MODEL",
+        "claude-sonnet-4-6"
+    ),
 }
 
 
+# إذا كان المزود الأساسي يفشل:
+# OPENAI -> GOOGLE
+# GOOGLE -> OPENAI
+# ANTHROPIC -> OPENAI
+FALLBACK_PROVIDER = os.getenv(
+    "AI_FALLBACK_PROVIDER",
+    "google"
+).lower()
+
+
+ENABLE_FALLBACK = os.getenv(
+    "AI_ENABLE_FALLBACK",
+    "true"
+).lower() in (
+    "1",
+    "true",
+    "yes",
+    "on"
+)
+
+
+# ============================================================
+# MODES
+# ============================================================
+
 MODES = {
+
     "normal": {
         "name": "🤖 عادي",
         "temperature": 0.7,
@@ -54,15 +96,35 @@ MODES = {
 }
 
 
+# ============================================================
+# REPLY TYPES
+# ============================================================
+
 REPLY_TYPES = {
-    "mention": "1️⃣ منشن البوت + كتابة الرسالة",
-    "channel": "2️⃣ مباشرة داخل القناة المحددة",
-    "direct": "3️⃣ يرد إذا كان الكلام موجهًا له",
-    "auto": "4️⃣ تلقائي ذكي + تنبيهات ونصائح",
+
+    "mention":
+        "1️⃣ منشن البوت + كتابة الرسالة",
+
+    "channel":
+        "2️⃣ مباشرة داخل القناة المحددة",
+
+    "direct":
+        "3️⃣ يرد إذا كان الكلام موجهًا له",
+
+    "auto":
+        "4️⃣ تلقائي ذكي + تنبيهات ونصائح",
+
+    "bot_chat":
+        "5️⃣ محادثة مع البوتات الأخرى",
 }
 
 
+# ============================================================
+# PERMISSION PRESETS
+# ============================================================
+
 PERMISSION_PRESETS = {
+
     "chat": {
         "manage_server": False,
         "manage_channels": False,
@@ -89,7 +151,12 @@ PERMISSION_PRESETS = {
 }
 
 
+# ============================================================
+# SETUP PRESETS
+# ============================================================
+
 SETUP_PRESETS = {
+
     "basic": {},
     "community": {},
     "active": {},
@@ -98,14 +165,20 @@ SETUP_PRESETS = {
 }
 
 
+# ============================================================
+# AI ENGINE
+# ============================================================
+
 class AIEngine:
 
     def __init__(self, db):
+
         self.db = db
+
         self.reload_keys()
 
     # ========================================================
-    # API Keys
+    # API KEYS / ENDPOINTS
     # ========================================================
 
     def reload_keys(self):
@@ -130,16 +203,17 @@ class AIEngine:
 
         self.openai_endpoint = os.getenv(
             "OPENAI_API_ENDPOINT",
-            "https://api.openai.com/v1/chat/completions"
-        )
+            "https://api.openai.com/v1/responses"
+        ).rstrip("/")
 
         self.anthropic_endpoint = os.getenv(
             "ANTHROPIC_API_ENDPOINT",
             "https://api.anthropic.com/v1/messages"
-        )
+        ).rstrip("/")
+
 
     # ========================================================
-    # Helpers
+    # HELPERS
     # ========================================================
 
     @staticmethod
@@ -153,8 +227,10 @@ class AIEngine:
 
         try:
             return dict(row)
+
         except (TypeError, ValueError):
             return None
+
 
     def get_mode(self, mode):
 
@@ -163,6 +239,7 @@ class AIEngine:
             MODES["normal"]
         )
 
+
     def get_reply_type(self, reply_type):
 
         return REPLY_TYPES.get(
@@ -170,13 +247,17 @@ class AIEngine:
             REPLY_TYPES["mention"]
         )
 
+
     # ========================================================
-    # System Prompt
+    # SYSTEM PROMPT
     # ========================================================
 
     def build_system_prompt(self, character):
 
-        character = self.row_to_dict(character) or {}
+        character = (
+            self.row_to_dict(character)
+            or {}
+        )
 
         personality = character.get(
             "personality",
@@ -206,8 +287,9 @@ class AIEngine:
 - لا تستخدم Embeds في نص الرد.
 """
 
+
     # ========================================================
-    # Google Gemini
+    # GOOGLE GEMINI
     # ========================================================
 
     async def _google(
@@ -219,6 +301,7 @@ class AIEngine:
     ):
 
         if not self.google_key:
+
             raise RuntimeError(
                 "Google API key is not configured."
             )
@@ -227,19 +310,29 @@ class AIEngine:
             not model
             or model == "gemini-2.5-flash"
         ):
-            model = "gemini-3.6-flash"
+
+            model = DEFAULT_MODELS["google"]
 
         system_parts = []
         contents = []
 
         for message in messages:
 
-            if not isinstance(message, dict):
+            if not isinstance(
+                message,
+                dict
+            ):
                 continue
 
-            role = message.get("role")
+            role = message.get(
+                "role"
+            )
+
             content = str(
-                message.get("content", "")
+                message.get(
+                    "content",
+                    ""
+                )
             )
 
             if not content:
@@ -247,7 +340,9 @@ class AIEngine:
 
             if role == "system":
 
-                system_parts.append(content)
+                system_parts.append(
+                    content
+                )
 
             elif role in (
                 "user",
@@ -270,21 +365,24 @@ class AIEngine:
                 })
 
         if not contents:
+
             raise RuntimeError(
                 "No user messages were provided to Google AI."
             )
 
         payload = {
+
             "contents": contents,
+
             "generationConfig": {
-                "maxOutputTokens": int(max_tokens)
+                "maxOutputTokens": int(
+                    max_tokens
+                )
             }
         }
 
         # Gemini 3.x:
-        # temperature is intentionally NOT sent.
-        # Google recommends keeping sampling parameters
-        # at their defaults for Gemini 3.x models.
+        # لا نرسل temperature عمدًا.
 
         if system_parts:
 
@@ -304,8 +402,12 @@ class AIEngine:
         )
 
         headers = {
-            "x-goog-api-key": self.google_key,
-            "Content-Type": "application/json"
+
+            "x-goog-api-key":
+                self.google_key,
+
+            "Content-Type":
+                "application/json"
         }
 
         timeout = aiohttp.ClientTimeout(
@@ -359,14 +461,6 @@ class AIEngine:
 
                     except Exception as exc:
 
-                        print(
-                            "❌ Google returned invalid JSON:"
-                        )
-
-                        print(
-                            raw_text[:3000]
-                        )
-
                         raise RuntimeError(
                             "Google API returned invalid JSON."
                         ) from exc
@@ -389,16 +483,22 @@ class AIEngine:
 
                         return ""
 
-                    first_candidate = candidates[0]
-
-                    content = first_candidate.get(
-                        "content",
-                        {}
+                    first_candidate = (
+                        candidates[0]
                     )
 
-                    parts = content.get(
-                        "parts",
-                        []
+                    content = (
+                        first_candidate.get(
+                            "content",
+                            {}
+                        )
+                    )
+
+                    parts = (
+                        content.get(
+                            "parts",
+                            []
+                        )
                     )
 
                     text_parts = []
@@ -416,6 +516,7 @@ class AIEngine:
                         )
 
                         if text:
+
                             text_parts.append(
                                 str(text)
                             )
@@ -460,8 +561,9 @@ class AIEngine:
                     f"Google network error: {exc}"
                 ) from exc
 
+
     # ========================================================
-    # OpenAI
+    # OPENAI RESPONSES API
     # ========================================================
 
     async def _openai(
@@ -473,25 +575,103 @@ class AIEngine:
     ):
 
         if not self.openai_key:
+
             raise RuntimeError(
                 "OpenAI API key is not configured."
             )
 
         if not model:
+
             model = DEFAULT_MODELS["openai"]
 
+        # ----------------------------------------------------
+        # Separate system messages from conversation
+        # ----------------------------------------------------
+
+        system_parts = []
+        input_messages = []
+
+        for message in messages:
+
+            if not isinstance(
+                message,
+                dict
+            ):
+                continue
+
+            role = message.get(
+                "role"
+            )
+
+            content = str(
+                message.get(
+                    "content",
+                    ""
+                )
+            )
+
+            if not content:
+                continue
+
+            if role == "system":
+
+                system_parts.append(
+                    content
+                )
+
+            elif role in (
+                "user",
+                "assistant"
+            ):
+
+                input_messages.append({
+                    "role": role,
+                    "content": content
+                })
+
+        if not input_messages:
+
+            raise RuntimeError(
+                "No user messages were provided to OpenAI."
+            )
+
+        # ----------------------------------------------------
+        # Responses API payload
+        # ----------------------------------------------------
+
         payload = {
+
             "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens
+
+            "input": input_messages,
+
+            "max_output_tokens": int(
+                max_tokens
+            )
         }
 
+        # GPT-5.6 family supports reasoning levels.
+        # We keep this conservative for Discord latency.
+
+        payload["reasoning"] = {
+            "effort": "none"
+        }
+
+        if system_parts:
+
+            payload["instructions"] = (
+                "\n\n".join(
+                    system_parts
+                )
+            )
+
         headers = {
-            "Authorization": (
-                f"Bearer {self.openai_key}"
-            ),
-            "Content-Type": "application/json"
+
+            "Authorization":
+                f"Bearer {self.openai_key}",
+
+            "Content-Type":
+                "application/json"
         }
 
         timeout = aiohttp.ClientTimeout(
@@ -500,7 +680,8 @@ class AIEngine:
 
         print(
             f"🤖 OPENAI REQUEST | "
-            f"model={model}"
+            f"model={model} | "
+            f"messages={len(input_messages)}"
         )
 
         async with aiohttp.ClientSession(
@@ -525,8 +706,11 @@ class AIEngine:
                     if response.status >= 400:
 
                         print(
-                            f"❌ OpenAI API response: "
-                            f"{raw_text[:3000]}"
+                            "❌ OpenAI API response:"
+                        )
+
+                        print(
+                            raw_text[:3000]
                         )
 
                         raise RuntimeError(
@@ -545,55 +729,103 @@ class AIEngine:
                             "OpenAI API returned invalid JSON."
                         ) from exc
 
-                    choices = data.get(
-                        "choices",
-                        []
-                    )
+                    # ------------------------------------------------
+                    # Preferred Responses API output_text
+                    # ------------------------------------------------
 
-                    if not choices:
-                        return ""
-
-                    message = choices[0].get(
-                        "message",
-                        {}
-                    )
-
-                    content = message.get(
-                        "content",
-                        ""
+                    output_text = data.get(
+                        "output_text"
                     )
 
                     if isinstance(
-                        content,
-                        list
+                        output_text,
+                        str
                     ):
 
-                        text_parts = []
+                        output_text = (
+                            output_text.strip()
+                        )
 
-                        for item in content:
+                        if output_text:
+
+                            print(
+                                f"✅ OpenAI response received | "
+                                f"length={len(output_text)}"
+                            )
+
+                            return output_text
+
+                    # ------------------------------------------------
+                    # Fallback parser for raw output blocks
+                    # ------------------------------------------------
+
+                    output = data.get(
+                        "output",
+                        []
+                    )
+
+                    text_parts = []
+
+                    for item in output:
+
+                        if not isinstance(
+                            item,
+                            dict
+                        ):
+                            continue
+
+                        content = item.get(
+                            "content",
+                            []
+                        )
+
+                        if not isinstance(
+                            content,
+                            list
+                        ):
+                            continue
+
+                        for block in content:
 
                             if not isinstance(
-                                item,
+                                block,
                                 dict
                             ):
                                 continue
 
-                            text = item.get(
+                            text = block.get(
                                 "text"
                             )
 
                             if text:
+
                                 text_parts.append(
                                     str(text)
                                 )
 
-                        content = "".join(
-                            text_parts
+                    result = "".join(
+                        text_parts
+                    ).strip()
+
+                    if result:
+
+                        print(
+                            f"✅ OpenAI response received | "
+                            f"length={len(result)}"
                         )
 
-                    return str(
-                        content
-                    ).strip()
+                    else:
+
+                        print(
+                            "⚠️ OpenAI returned "
+                            "an empty response:"
+                        )
+
+                        print(
+                            str(data)[:3000]
+                        )
+
+                    return result
 
             except asyncio.TimeoutError:
 
@@ -608,8 +840,9 @@ class AIEngine:
                     f"OpenAI network error: {exc}"
                 ) from exc
 
+
     # ========================================================
-    # Anthropic
+    # ANTHROPIC
     # ========================================================
 
     async def _anthropic(
@@ -621,11 +854,13 @@ class AIEngine:
     ):
 
         if not self.anthropic_key:
+
             raise RuntimeError(
                 "Anthropic API key is not configured."
             )
 
         if not model:
+
             model = DEFAULT_MODELS["anthropic"]
 
         system_parts = []
@@ -633,12 +868,21 @@ class AIEngine:
 
         for message in messages:
 
-            if not isinstance(message, dict):
+            if not isinstance(
+                message,
+                dict
+            ):
                 continue
 
-            role = message.get("role")
+            role = message.get(
+                "role"
+            )
+
             content = str(
-                message.get("content", "")
+                message.get(
+                    "content",
+                    ""
+                )
             )
 
             if not content:
@@ -660,11 +904,25 @@ class AIEngine:
                     "content": content
                 })
 
+        if not chat_messages:
+
+            raise RuntimeError(
+                "No user messages were provided to Anthropic."
+            )
+
         payload = {
+
             "model": model,
-            "max_tokens": int(max_tokens),
+
+            "max_tokens": int(
+                max_tokens
+            ),
+
             "messages": chat_messages,
-            "temperature": float(temperature)
+
+            "temperature": float(
+                temperature
+            )
         }
 
         if system_parts:
@@ -676,9 +934,15 @@ class AIEngine:
             )
 
         headers = {
-            "x-api-key": self.anthropic_key,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json"
+
+            "x-api-key":
+                self.anthropic_key,
+
+            "anthropic-version":
+                "2023-06-01",
+
+            "Content-Type":
+                "application/json"
         }
 
         timeout = aiohttp.ClientTimeout(
@@ -712,8 +976,11 @@ class AIEngine:
                     if response.status >= 400:
 
                         print(
-                            f"❌ Anthropic API response: "
-                            f"{raw_text[:3000]}"
+                            "❌ Anthropic API response:"
+                        )
+
+                        print(
+                            raw_text[:3000]
                         )
 
                         raise RuntimeError(
@@ -757,13 +1024,16 @@ class AIEngine:
                         )
 
                         if text:
+
                             text_parts.append(
                                 str(text)
                             )
 
-                    return "".join(
+                    result = "".join(
                         text_parts
                     ).strip()
+
+                    return result
 
             except asyncio.TimeoutError:
 
@@ -778,8 +1048,9 @@ class AIEngine:
                     f"Anthropic network error: {exc}"
                 ) from exc
 
+
     # ========================================================
-    # Request Router
+    # REQUEST ROUTER
     # ========================================================
 
     async def request(
@@ -839,8 +1110,108 @@ class AIEngine:
             f"Unsupported AI provider: {provider}"
         )
 
+
     # ========================================================
-    # Normal Generate
+    # REQUEST WITH FALLBACK
+    # ========================================================
+
+    async def request_with_fallback(
+        self,
+        provider,
+        model,
+        messages,
+        temperature=0.8,
+        max_tokens=1200
+    ):
+
+        provider = (
+            provider
+            or DEFAULT_PROVIDER
+        ).lower()
+
+        model = (
+            model
+            or DEFAULT_MODELS.get(
+                provider
+            )
+        )
+
+        try:
+
+            return await self.request(
+                provider=provider,
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+
+        except Exception as primary_error:
+
+            print(
+                f"⚠️ PRIMARY AI FAILED | "
+                f"provider={provider} | "
+                f"error={type(primary_error).__name__}: "
+                f"{primary_error}"
+            )
+
+            if not ENABLE_FALLBACK:
+
+                raise
+
+            fallback = FALLBACK_PROVIDER
+
+            if (
+                not fallback
+                or fallback == provider
+            ):
+
+                raise
+
+            fallback_model = DEFAULT_MODELS.get(
+                fallback
+            )
+
+            print(
+                f"🔄 AI FALLBACK | "
+                f"{provider} -> {fallback} | "
+                f"model={fallback_model}"
+            )
+
+            try:
+
+                result = await self.request(
+                    provider=fallback,
+                    model=fallback_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+
+                print(
+                    f"✅ FALLBACK SUCCESS | "
+                    f"provider={fallback}"
+                )
+
+                return result
+
+            except Exception as fallback_error:
+
+                print(
+                    f"❌ FALLBACK FAILED | "
+                    f"provider={fallback} | "
+                    f"error={type(fallback_error).__name__}: "
+                    f"{fallback_error}"
+                )
+
+                raise RuntimeError(
+                    "Primary AI provider and fallback "
+                    "provider both failed."
+                ) from fallback_error
+
+
+    # ========================================================
+    # NORMAL GENERATE
     # ========================================================
 
     async def generate(
@@ -898,9 +1269,10 @@ class AIEngine:
             and model == "gemini-2.5-flash"
         ):
 
-            model = "gemini-3.6-flash"
+            model = DEFAULT_MODELS["google"]
 
         messages = [
+
             {
                 "role": "system",
                 "content":
@@ -956,7 +1328,7 @@ class AIEngine:
 
         try:
 
-            response = await self.request(
+            response = await self.request_with_fallback(
                 provider=provider,
                 model=model,
                 messages=messages,
@@ -1014,8 +1386,9 @@ class AIEngine:
 
         return response
 
+
     # ========================================================
-    # Proactive AI
+    # PROACTIVE AI
     # ========================================================
 
     async def generate_proactive(
@@ -1042,8 +1415,10 @@ class AIEngine:
                 "Character not found."
             )
 
-        system_prompt = self.build_system_prompt(
-            character
+        system_prompt = (
+            self.build_system_prompt(
+                character
+            )
         )
 
         proactive_prompt = """
@@ -1127,6 +1502,7 @@ NO_ALERT
             return None
 
         messages = [
+
             {
                 "role": "system",
                 "content":
@@ -1134,6 +1510,7 @@ NO_ALERT
                     + "\n\n"
                     + proactive_prompt
             },
+
             {
                 "role": "user",
                 "content": (
@@ -1162,11 +1539,11 @@ NO_ALERT
             and model == "gemini-2.5-flash"
         ):
 
-            model = "gemini-3.6-flash"
+            model = DEFAULT_MODELS["google"]
 
         try:
 
-            response = await self.request(
+            response = await self.request_with_fallback(
                 provider=provider,
                 model=model,
                 messages=messages,
@@ -1198,3 +1575,4 @@ NO_ALERT
             return None
 
         return response
+```
