@@ -35,8 +35,9 @@ AI_PROVIDER = os.getenv(
 
 AI_MODEL = os.getenv(
     "GOOGLE_MODEL",
-    "gemini-2.5-flash-lite"
+    "gemini-3.5-flash-lite"
 ).strip()
+
 
 if AI_PROVIDER not in {
     "openai",
@@ -44,10 +45,12 @@ if AI_PROVIDER not in {
     "anthropic"
 }:
     AI_PROVIDER = "google"
+
     AI_MODEL = os.getenv(
         "GOOGLE_MODEL",
-        "gemini-2.5-flash-lite"
+        "gemini-3.5-flash-lite"
     ).strip()
+
 
 print(
     f"🤖 AI CONFIG | provider={AI_PROVIDER} | model={AI_MODEL}"
@@ -70,7 +73,10 @@ AI_MODES = {
 def get_ai_mode(config):
 
     mode = str(
-        config.get("mode", "normal")
+        config.get(
+            "mode",
+            "normal"
+        )
     ).lower().strip()
 
     if mode not in AI_MODES:
@@ -199,6 +205,7 @@ def row_to_dict(row):
         return row
 
     try:
+
         return dict(row)
 
     except Exception:
@@ -383,7 +390,9 @@ def split_message(
         ].lstrip()
 
     if text:
-        chunks.append(text)
+        chunks.append(
+            text
+        )
 
     return chunks
 
@@ -398,18 +407,18 @@ async def send_ai_response(
 ):
 
     if not response:
-        return
+        return False
 
     chunks = split_message(
         response
     )
 
     if not chunks:
-        return
+        return False
 
     try:
 
-        # الرد الحقيقي على رسالة المستخدم
+        # أول جزء = Reply حقيقي
         await message.reply(
             chunks[0],
             mention_author=False
@@ -419,6 +428,25 @@ async def send_ai_response(
             "↩️🔥 AI REPLIED TO ORIGINAL MESSAGE"
         )
 
+    except discord.Forbidden:
+
+        print(
+            "❌ Discord Forbidden: "
+            "MyAI cannot send/reply in this channel."
+        )
+
+        return False
+
+    except discord.HTTPException:
+
+        print(
+            "❌ Discord HTTP error while replying:"
+        )
+
+        traceback.print_exc()
+
+        return False
+
     except Exception:
 
         print(
@@ -427,7 +455,7 @@ async def send_ai_response(
 
         traceback.print_exc()
 
-        return
+        return False
 
     for chunk in chunks[1:]:
 
@@ -445,7 +473,9 @@ async def send_ai_response(
 
             traceback.print_exc()
 
-            return
+            return False
+
+    return True
 
 
 # =========================================================
@@ -457,6 +487,9 @@ def has_management_permission(
 ):
 
     if member.guild.owner_id == member.id:
+        return True
+
+    if member.guild_permissions.administrator:
         return True
 
     roles = sorted(
@@ -562,14 +595,20 @@ def is_directed_to_bot(
     if bot.user is None:
         return False
 
+    # -----------------------------------------------------
     # Mention
+    # -----------------------------------------------------
+
     if any(
         user.id == bot.user.id
         for user in message.mentions
     ):
         return True
 
+    # -----------------------------------------------------
     # Reply to MyAI
+    # -----------------------------------------------------
+
     reference = getattr(
         message,
         "reference",
@@ -598,6 +637,10 @@ def is_directed_to_bot(
             ):
                 return True
 
+    # -----------------------------------------------------
+    # Name at beginning
+    # -----------------------------------------------------
+
     content = normalize_text(
         message.content
     )
@@ -606,8 +649,12 @@ def is_directed_to_bot(
         return False
 
     names = {
-        normalize_text(bot.user.name),
-        normalize_text(bot.user.display_name),
+        normalize_text(
+            bot.user.name
+        ),
+        normalize_text(
+            bot.user.display_name
+        ),
         "myai",
         "my ai"
     }
@@ -620,7 +667,9 @@ def is_directed_to_bot(
 
     for name in names:
 
-        escaped = re.escape(name)
+        escaped = re.escape(
+            name
+        )
 
         patterns = [
 
@@ -693,13 +742,14 @@ async def generate_chat_reply(
             "⚠️ AI returned empty response."
         )
 
-        return
+        return False
 
     print(
-        f"✅ AI RESPONSE RECEIVED | length={len(response)}"
+        f"✅ AI RESPONSE RECEIVED | "
+        f"length={len(response)}"
     )
 
-    await send_ai_response(
+    return await send_ai_response(
         message,
         response
     )
@@ -758,7 +808,8 @@ async def handle_auto_ai(
         )
 
         print(
-            f"⏳ AUTO COOLDOWN | remaining={remaining}s"
+            f"⏳ AUTO COOLDOWN | "
+            f"remaining={remaining}s"
         )
 
         return
@@ -774,7 +825,9 @@ async def handle_auto_ai(
     response = await ai.generate_proactive(
         guild_id=message.guild.id,
         channel_id=message.channel.id,
-        character_name=character.get("name"),
+        character_name=character.get(
+            "name"
+        ),
         provider=AI_PROVIDER,
         model=AI_MODEL
     )
@@ -782,7 +835,9 @@ async def handle_auto_ai(
     if not response:
         return
 
-    response = str(response).strip()
+    response = str(
+        response
+    ).strip()
 
     if response.upper() == "NO_ALERT":
 
@@ -826,6 +881,7 @@ def bot_chat_allowed(
     )
 
     if count >= BOT_CHAT_MAX_REPLIES:
+
         return False
 
     return True
@@ -862,7 +918,8 @@ async def on_ready():
     )
 
     print(
-        f"🌐 Connected to {len(bot.guilds)} server(s)."
+        f"🌐 Connected to "
+        f"{len(bot.guilds)} server(s)."
     )
 
     print(
@@ -885,11 +942,13 @@ async def on_ready():
     )
 
     print(
-        f"🤖 Active AI Provider | {AI_PROVIDER}"
+        f"🤖 Active AI Provider | "
+        f"{AI_PROVIDER}"
     )
 
     print(
-        f"🧠 Active AI Model | {AI_MODEL}"
+        f"🧠 Active AI Model | "
+        f"{AI_MODEL}"
     )
 
 
@@ -903,8 +962,7 @@ async def on_message(
 ):
 
     # =====================================================
-    # VERY IMPORTANT:
-    # This log MUST show the real sender.
+    # LOG THE ACTUAL EVENT
     # =====================================================
 
     try:
@@ -922,8 +980,10 @@ async def on_message(
             f"{message.guild.id if message.guild else None}\n"
             f"💬 Channel    : "
             f"{getattr(message.channel, 'name', message.channel)}\n"
-            f"🆔 Channel ID : {message.channel.id}\n"
-            f"📝 Message    : {message.content!r}\n"
+            f"🆔 Channel ID : "
+            f"{message.channel.id}\n"
+            f"📝 Message    : "
+            f"{message.content!r}\n"
             f"🏷️ Mentions   : "
             f"{[f'{u} ({u.id})' for u in message.mentions]}\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -944,19 +1004,26 @@ async def on_message(
     if message.guild is None:
 
         print(
-            "⏭️ Ignored DM."
+            "⏭️ Ignored DM message."
         )
 
         return
 
     # =====================================================
-    # IGNORE ALL BOT MESSAGES
+    # ONLY IGNORE MYAI ITSELF HERE
+    #
+    # IMPORTANT:
+    # Do NOT use message.author.bot here.
+    # Bot Chat needs to receive other bots.
     # =====================================================
 
-    if message.author.bot:
+    if (
+        bot.user is not None
+        and message.author.id == bot.user.id
+    ):
 
         print(
-            "⏭️ Ignored bot message."
+            "⏭️ Ignored MyAI own message."
         )
 
         return
@@ -1036,6 +1103,23 @@ async def on_message(
         return
 
     # =====================================================
+    # OTHER BOT FILTER
+    #
+    # Bot Chat is the ONLY mode that accepts other bots.
+    # =====================================================
+
+    if (
+        message.author.bot
+        and reply_type != "bot_chat"
+    ):
+
+        print(
+            "⏭️ Ignored another bot message."
+        )
+
+        return
+
+    # =====================================================
     # CHARACTER
     # =====================================================
 
@@ -1075,6 +1159,24 @@ async def on_message(
 
             return
 
+        # إذا تم اختيار روم، يلتزم Mention بالروم
+        configured_channel = normalize_channel_id(
+            config.get("channel_id")
+        )
+
+        if configured_channel is not None:
+
+            if not channel_matches(
+                message,
+                configured_channel
+            ):
+
+                print(
+                    "⏭️ Mention outside configured channel."
+                )
+
+                return
+
         mentioned = any(
             user.id == bot.user.id
             for user in message.mentions
@@ -1105,21 +1207,24 @@ async def on_message(
             user_message = "السلام عليكم"
 
         print(
-            f"💬 User message = {user_message!r}"
+            f"💬 User message = "
+            f"{user_message!r}"
         )
 
         try:
 
-            await generate_chat_reply(
+            success = await generate_chat_reply(
                 message,
                 config,
                 character,
                 user_message
             )
 
-            print(
-                "✅🔥 MENTION RESPONSE SENT!"
-            )
+            if success:
+
+                print(
+                    "✅🔥 MENTION RESPONSE SENT!"
+                )
 
         except Exception:
 
@@ -1174,16 +1279,18 @@ async def on_message(
 
         try:
 
-            await generate_chat_reply(
+            success = await generate_chat_reply(
                 message,
                 config,
                 character,
                 content
             )
 
-            print(
-                "✅📢 CHANNEL RESPONSE SENT!"
-            )
+            if success:
+
+                print(
+                    "✅📢 CHANNEL RESPONSE SENT!"
+                )
 
         except Exception:
 
@@ -1286,8 +1393,9 @@ async def on_message(
             "🤖 MODE = BOT CHAT"
         )
 
-        # MyAI ignores its own messages because
-        # they are already handled above.
+        # -------------------------------------------------
+        # Safety
+        # -------------------------------------------------
 
         if not bot_chat_allowed(
             message.channel.id
@@ -1298,6 +1406,11 @@ async def on_message(
             )
 
             return
+
+        # -------------------------------------------------
+        # Bot Chat requires the message to be directed
+        # to MyAI.
+        # -------------------------------------------------
 
         directed = is_directed_to_bot(
             message
@@ -1327,20 +1440,22 @@ async def on_message(
 
         try:
 
-            await generate_chat_reply(
+            success = await generate_chat_reply(
                 message,
                 config,
                 character,
                 user_message
             )
 
-            register_bot_chat_reply(
-                message.channel.id
-            )
+            if success:
 
-            print(
-                "✅🤖 BOT CHAT RESPONSE SENT!"
-            )
+                register_bot_chat_reply(
+                    message.channel.id
+                )
+
+                print(
+                    "✅🤖 BOT CHAT RESPONSE SENT!"
+                )
 
         except Exception:
 
@@ -1352,8 +1467,13 @@ async def on_message(
 
         return
 
+    # =====================================================
+    # UNKNOWN TYPE
+    # =====================================================
+
     print(
-        f"⚠️ Unknown reply type: {reply_type!r}"
+        f"⚠️ Unknown reply type: "
+        f"{reply_type!r}"
     )
 
 
@@ -1420,7 +1540,9 @@ async def ai_command(
             guild_id=guild_id,
             channel_id=interaction.channel.id,
             user_id=interaction.user.id,
-            character_name=character.get("name"),
+            character_name=character.get(
+                "name"
+            ),
             user_message=message,
             provider=AI_PROVIDER,
             model=AI_MODEL,
@@ -1435,7 +1557,11 @@ async def ai_command(
 
             return
 
-        for chunk in split_message(response):
+        chunks = split_message(
+            response
+        )
+
+        for chunk in chunks:
 
             await interaction.followup.send(
                 chunk
@@ -1509,7 +1635,8 @@ class SetupChannelSelect(
         )
 
         await interaction.response.send_message(
-            f"✅ تم اختيار الروم: {channel.mention}\n"
+            f"✅ تم اختيار الروم: "
+            f"{channel.mention}\n"
             "🟢 تم تفعيل نظام الذكاء الاصطناعي.",
             ephemeral=True
         )
@@ -1559,7 +1686,7 @@ class SetupReplyTypeSelect(
             discord.SelectOption(
                 label="5 - Bot Chat",
                 value="bot_chat",
-                description="نظام محادثة MyAI مع البوتات"
+                description="محادثة MyAI مع البوتات"
             ),
         ]
 
@@ -2030,7 +2157,9 @@ async def character_use(
 
     save_config(
         interaction.guild.id,
-        character_name=character.get("name")
+        character_name=character.get(
+            "name"
+        )
     )
 
     await interaction.response.send_message(
