@@ -148,9 +148,12 @@ class AIEngine:
             return None
 
         if isinstance(row, dict):
-            return dict(row)
+            return row
 
-        return dict(row)
+        try:
+            return dict(row)
+        except (TypeError, ValueError):
+            return None
 
     def get_mode(self, mode):
 
@@ -171,6 +174,8 @@ class AIEngine:
     # ========================================================
 
     def build_system_prompt(self, character):
+
+        character = self.row_to_dict(character) or {}
 
         personality = character.get(
             "personality",
@@ -301,8 +306,7 @@ class AIEngine:
                 if response.status >= 400:
 
                     raise RuntimeError(
-                        f"Google API error: "
-                        f"{data}"
+                        f"Google API error: {data}"
                     )
 
                 candidates = data.get(
@@ -374,8 +378,7 @@ class AIEngine:
                 if response.status >= 400:
 
                     raise RuntimeError(
-                        f"OpenAI API error: "
-                        f"{data}"
+                        f"OpenAI API error: {data}"
                     )
 
                 choices = data.get(
@@ -474,8 +477,7 @@ class AIEngine:
                 if response.status >= 400:
 
                     raise RuntimeError(
-                        f"Anthropic API error: "
-                        f"{data}"
+                        f"Anthropic API error: {data}"
                     )
 
                 blocks = data.get(
@@ -567,6 +569,10 @@ class AIEngine:
             character_name
         )
 
+        character = self.row_to_dict(
+            character
+        )
+
         if not character:
             raise ValueError(
                 "Character not found."
@@ -613,7 +619,14 @@ class AIEngine:
 
         for item in history:
 
-            role = item["role"]
+            item = self.row_to_dict(item)
+
+            if not item:
+                continue
+
+            role = item.get(
+                "role"
+            )
 
             if role not in (
                 "user",
@@ -621,14 +634,22 @@ class AIEngine:
             ):
                 continue
 
+            content = item.get(
+                "content",
+                ""
+            )
+
+            if not content:
+                continue
+
             messages.append({
                 "role": role,
-                "content": item["content"]
+                "content": str(content)
             })
 
         messages.append({
             "role": "user",
-            "content": user_message
+            "content": str(user_message)
         })
 
         response = await self.request(
@@ -655,7 +676,7 @@ class AIEngine:
             user_id=user_id,
             character_name=character_name,
             role="user",
-            content=user_message
+            content=str(user_message)
         )
 
         self.db.add_message(
@@ -685,6 +706,10 @@ class AIEngine:
         character = self.db.get_character(
             guild_id,
             character_name
+        )
+
+        character = self.row_to_dict(
+            character
         )
 
         if not character:
@@ -731,13 +756,6 @@ NO_ALERT
 اكتب تنبيهًا مختصرًا ومفيدًا.
 اشرح المشكلة.
 ثم أعطِ نصيحة عملية للمسؤولين.
-
-مثال:
-
-⚠️ يبدو أن هناك مشكلة متكررة في استخدام البوت.
-
-💡 النصيحة:
-تأكدوا من صلاحيات البوت في هذه القناة ومن إعداد قناة AI.
 """
 
         history = self.db.get_history(
@@ -751,6 +769,11 @@ NO_ALERT
 
         for item in history:
 
+            item = self.row_to_dict(item)
+
+            if not item:
+                continue
+
             role = item.get(
                 "role",
                 "user"
@@ -760,6 +783,9 @@ NO_ALERT
                 "content",
                 ""
             )
+
+            if not content:
+                continue
 
             context_lines.append(
                 f"{role}: {content}"
