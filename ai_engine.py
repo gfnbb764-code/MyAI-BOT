@@ -10,11 +10,19 @@ class AIEngine:
         "google"
     ).lower()
 
+    # ==========================================================
+    # DEFAULT MODELS
+    # ==========================================================
+
     DEFAULT_MODELS = {
-        "google": "gemini-2.5-flash",
+        "google": "gemini-3.6-flash",
         "openai": "gpt-5.6-luna",
         "anthropic": "claude-sonnet-4-6",
     }
+
+    # ==========================================================
+    # MODES
+    # ==========================================================
 
     MODES = {
         "normal": {
@@ -58,6 +66,10 @@ class AIEngine:
         }
     }
 
+    # ==========================================================
+    # REPLY TYPES
+    # ==========================================================
+
     REPLY_TYPES = {
         "mention": {
             "name": "📌 عند المنشن",
@@ -74,6 +86,10 @@ class AIEngine:
             "description": "لا يرد تلقائيًا."
         }
     }
+
+    # ==========================================================
+    # PERMISSION PRESETS
+    # ==========================================================
 
     PERMISSION_PRESETS = {
         "chat": {
@@ -108,6 +124,10 @@ class AIEngine:
             "manage_roles": True
         }
     }
+
+    # ==========================================================
+    # SETUP PRESETS
+    # ==========================================================
 
     SETUP_PRESETS = {
         "basic": {
@@ -151,12 +171,16 @@ class AIEngine:
         }
     }
 
+    # ==========================================================
+    # INIT
+    # ==========================================================
+
     def __init__(self, database):
         self.database = database
         self.reload_keys()
 
     # ==========================================================
-    # API
+    # API KEYS
     # ==========================================================
 
     def reload_keys(self):
@@ -227,6 +251,10 @@ class AIEngine:
             self.MODES["normal"]
         )
 
+    # ==========================================================
+    # REPLY TYPE
+    # ==========================================================
+
     def get_reply_type(self, reply_type):
 
         return self.REPLY_TYPES.get(
@@ -294,6 +322,10 @@ class AIEngine:
                 "مفتاح Gemini غير موجود."
             )
 
+        # تأكيد استخدام الموديل الجديد
+        if not model or model == "gemini-2.5-flash":
+            model = "gemini-3.6-flash"
+
         system_parts = []
         contents = []
 
@@ -325,7 +357,9 @@ class AIEngine:
                 contents.append({
                     "role": "model",
                     "parts": [
-                        {"text": text}
+                        {
+                            "text": text
+                        }
                     ]
                 })
 
@@ -334,12 +368,25 @@ class AIEngine:
                 contents.append({
                     "role": "user",
                     "parts": [
-                        {"text": text}
+                        {
+                            "text": text
+                        }
                     ]
                 })
 
+        if not contents:
+            contents.append({
+                "role": "user",
+                "parts": [
+                    {
+                        "text": "مرحبًا"
+                    }
+                ]
+            })
+
         payload = {
             "contents": contents,
+
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens
@@ -508,7 +555,6 @@ class AIEngine:
             )
 
         system = []
-
         chat = []
 
         for message in messages:
@@ -526,8 +572,11 @@ class AIEngine:
             )
 
             if role == "system":
+
                 system.append(content)
+
             else:
+
                 chat.append({
                     "role": role,
                     "content": content
@@ -540,6 +589,7 @@ class AIEngine:
         }
 
         if system:
+
             payload["system"] = "\n\n".join(
                 system
             )
@@ -577,7 +627,7 @@ class AIEngine:
                         )
                     )
 
-        return "".join(
+        result = "".join(
             block.get("text", "")
             for block in data.get(
                 "content",
@@ -585,6 +635,13 @@ class AIEngine:
             )
             if block.get("type") == "text"
         ).strip()
+
+        if not result:
+            raise RuntimeError(
+                "Anthropic رجع ردًا فارغًا."
+            )
+
+        return result
 
     # ==========================================================
     # ROUTER
@@ -604,13 +661,24 @@ class AIEngine:
             or self.DEFAULT_PROVIDER
         ).lower()
 
-        model = (
-            model
-            or self.DEFAULT_MODELS.get(
-                provider,
-                "gemini-2.5-flash"
+        # اختيار الموديل الصحيح تلقائيًا
+        if provider == "google":
+
+            if (
+                not model
+                or model == "gemini-2.5-flash"
+            ):
+                model = "gemini-3.6-flash"
+
+        else:
+
+            model = (
+                model
+                or self.DEFAULT_MODELS.get(
+                    provider,
+                    ""
+                )
             )
-        )
 
         if provider == "google":
 
@@ -669,6 +737,7 @@ class AIEngine:
         )
 
         if not character:
+
             raise RuntimeError(
                 "الشخصية غير موجودة."
             )
@@ -683,15 +752,29 @@ class AIEngine:
                 "PRIMARY_AI_PROVIDER",
                 "google"
             )
-        )
+        ).lower()
 
-        model = (
-            model
-            or self.DEFAULT_MODELS.get(
-                provider,
-                "gemini-2.5-flash"
+        # ======================================================
+        # GOOGLE MODEL FIX
+        # ======================================================
+
+        if provider == "google":
+
+            if (
+                not model
+                or model == "gemini-2.5-flash"
+            ):
+                model = "gemini-3.6-flash"
+
+        else:
+
+            model = (
+                model
+                or self.DEFAULT_MODELS.get(
+                    provider,
+                    ""
+                )
             )
-        )
 
         messages = [
             {
@@ -702,6 +785,10 @@ class AIEngine:
                     )
             }
         ]
+
+        # ======================================================
+        # HISTORY
+        # ======================================================
 
         history = self.database.get_history(
             guild_id,
@@ -728,16 +815,32 @@ class AIEngine:
                 ""
             )
 
-            if content:
-                messages.append({
-                    "role": role,
-                    "content": content
-                })
+            if not content:
+                continue
+
+            # Discord/DB assistant -> Gemini model
+            if role == "assistant":
+                role = "assistant"
+
+            messages.append({
+                "role": role,
+                "content": content
+            })
+
+        # ======================================================
+        # CURRENT MESSAGE
+        # ======================================================
 
         messages.append({
             "role": "user",
-            "content": user_message
+            "content": str(
+                user_message
+            )
         })
+
+        # ======================================================
+        # AI REQUEST
+        # ======================================================
 
         response = await self.request(
             provider,
@@ -751,13 +854,27 @@ class AIEngine:
             ]
         )
 
+        response = str(
+            response
+        ).strip()
+
+        if not response:
+
+            raise RuntimeError(
+                "الذكاء الاصطناعي رجع ردًا فارغًا."
+            )
+
+        # ======================================================
+        # SAVE HISTORY
+        # ======================================================
+
         self.database.add_message(
             guild_id,
             channel_id,
             user_id,
             character_name,
             "user",
-            user_message
+            str(user_message)
         )
 
         self.database.add_message(
