@@ -70,10 +70,6 @@ bot = MyAIBot()
 # =========================================================
 
 def get_config(guild_id: int):
-    """
-    database.py الحالي يستخدم get_ai_config().
-    """
-
     try:
         config = db.get_ai_config(guild_id)
 
@@ -88,10 +84,6 @@ def get_config(guild_id: int):
 
 
 def save_config(guild_id: int, **kwargs):
-    """
-    حفظ الإعدادات باستخدام الدالة الفعلية الموجودة في database.py.
-    """
-
     return db.save_ai_config(
         guild_id,
         **kwargs
@@ -99,9 +91,6 @@ def save_config(guild_id: int, **kwargs):
 
 
 def get_character(guild_id: int, name: str = None):
-    """
-    جلب شخصية محددة.
-    """
 
     if name:
         character = db.get_character(
@@ -116,9 +105,6 @@ def get_character(guild_id: int, name: str = None):
 
 
 def get_active_character(guild_id: int, config):
-    """
-    جلب الشخصية النشطة.
-    """
 
     character_name = config.get("character_name")
 
@@ -131,7 +117,6 @@ def get_active_character(guild_id: int, config):
         if character:
             return character
 
-    # إذا لم توجد شخصية محددة، نستخدم أول شخصية
     try:
         characters = db.get_characters(guild_id)
 
@@ -261,7 +246,6 @@ def can_control_bot(member: discord.Member):
     if not isinstance(member, discord.Member):
         return False
 
-    # Owner always allowed
     if member.id == member.guild.owner_id:
         return True
 
@@ -574,6 +558,55 @@ async def ai_command(
 
 
 # =========================================================
+# SETUP CHANNEL SELECT
+# =========================================================
+
+class SetupChannelSelect(discord.ui.ChannelSelect):
+
+    def __init__(self):
+
+        super().__init__(
+            placeholder="اختر قناة الرد...",
+            channel_types=[
+                discord.ChannelType.text
+            ],
+            min_values=1,
+            max_values=1
+        )
+
+    async def callback(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        if interaction.guild is None:
+            return
+
+        if not can_control_bot(
+            interaction.user
+        ):
+
+            await interaction.response.send_message(
+                "❌ هذه الإعدادات لأعلى 4 رتب فقط.",
+                ephemeral=True
+            )
+
+            return
+
+        channel = self.values[0]
+
+        save_config(
+            interaction.guild.id,
+            channel_id=channel.id
+        )
+
+        await interaction.response.send_message(
+            f"✅ تم تحديد قناة الرد: {channel.mention}",
+            ephemeral=True
+        )
+
+
+# =========================================================
 # SETUP VIEW
 # =========================================================
 
@@ -586,6 +619,10 @@ class SetupView(discord.ui.View):
         )
 
         self.guild_id = guild_id
+
+        self.add_item(
+            SetupChannelSelect()
+        )
 
     async def permission_check(
         self,
@@ -730,41 +767,6 @@ class SetupView(discord.ui.View):
 
         await interaction.response.send_message(
             f"✅ تم اختيار: **{names[value]}**",
-            ephemeral=True
-        )
-
-    # -----------------------------------------------------
-    # CHANNEL
-    # -----------------------------------------------------
-
-    @discord.ui.channel_select(
-        placeholder="اختر قناة الرد...",
-        channel_types=[
-            discord.ChannelType.text
-        ],
-        min_values=1,
-        max_values=1
-    )
-    async def channel_select(
-        self,
-        interaction,
-        select
-    ):
-
-        if not await self.permission_check(
-            interaction
-        ):
-            return
-
-        channel = select.values[0]
-
-        save_config(
-            self.guild_id,
-            channel_id=channel.id
-        )
-
-        await interaction.response.send_message(
-            f"✅ تم تحديد قناة الرد: {channel.mention}",
             ephemeral=True
         )
 
@@ -1246,16 +1248,13 @@ async def on_message(
     message: discord.Message
 ):
 
-    # تجاهل البوتات
     if message.author.bot:
         return
 
-    # أوامر prefix
     await bot.process_commands(
         message
     )
 
-    # الرسائل الخاصة
     if message.guild is None:
         return
 
@@ -1472,6 +1471,7 @@ async def on_app_command_error(
 ):
 
     print("❌ Slash command error:")
+
     traceback.print_exception(
         type(error),
         error,
