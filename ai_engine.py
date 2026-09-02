@@ -11,7 +11,7 @@ import aiohttp
 
 DEFAULT_PROVIDER = os.getenv(
     "PRIMARY_AI_PROVIDER",
-    "openai",
+    "google",
 ).lower().strip()
 
 DEFAULT_MODELS = {
@@ -19,10 +19,12 @@ DEFAULT_MODELS = {
         "OPENAI_MODEL",
         "gpt-5.6-luna",
     ),
+
     "google": os.getenv(
         "GOOGLE_MODEL",
-        "gemini-3.6-flash",
+        "gemini-2.5-flash-lite",
     ),
+
     "anthropic": os.getenv(
         "ANTHROPIC_MODEL",
         "claude-sonnet-4-6",
@@ -136,8 +138,8 @@ class AIEngine:
     def reload_keys(self):
 
         self.google_api_key = (
-            os.getenv("GOOGLE_API_KEY")
-            or os.getenv("GEMINI_API_KEY")
+            os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
         )
 
         self.openai_api_key = os.getenv(
@@ -279,7 +281,7 @@ class AIEngine:
         if not self.google_api_key:
 
             raise RuntimeError(
-                "GOOGLE_API_KEY / GEMINI_API_KEY is not configured."
+                "GEMINI_API_KEY / GOOGLE_API_KEY is not configured."
             )
 
         url = (
@@ -330,7 +332,9 @@ class AIEngine:
                     }
                 ],
             },
+
             "contents": contents,
+
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
@@ -357,7 +361,7 @@ class AIEngine:
                     raise RuntimeError(
                         f"Google API HTTP "
                         f"{response.status}: "
-                        f"{text[:1500]}"
+                        f"{text[:2000]}"
                     )
 
                 try:
@@ -462,11 +466,6 @@ class AIEngine:
                     "content": content,
                 }
             )
-
-        # IMPORTANT:
-        # gpt-5.6-luna does not accept temperature.
-        # Keep temperature for compatibility with the
-        # other providers, but do not send it to OpenAI.
 
         payload = {
             "model": model,
