@@ -73,13 +73,13 @@ MODES = {
     "normal": {
         "temperature": 0.7,
         "max_tokens": 1200,
-        "auto_reply": False,
+        "auto_reply": True,
     },
 
     "friendly": {
         "temperature": 0.85,
         "max_tokens": 1200,
-        "auto_reply": False,
+        "auto_reply": True,
     },
 
     "active": {
@@ -97,7 +97,7 @@ MODES = {
     "professional": {
         "temperature": 0.45,
         "max_tokens": 1200,
-        "auto_reply": False,
+        "auto_reply": True,
     },
 }
 
@@ -199,20 +199,17 @@ class AIEngine:
             return dict(row)
 
         try:
-
             return dict(row)
 
         except Exception:
 
             try:
-
                 return {
                     key: row[key]
                     for key in row.keys()
                 }
 
             except Exception:
-
                 return None
 
     def get_mode(
@@ -392,10 +389,6 @@ class AIEngine:
                 "is not configured."
             )
 
-        # -------------------------------------------------
-        # Always normalize old Gemini model names
-        # -------------------------------------------------
-
         model = normalize_google_model(
             model
         )
@@ -421,14 +414,12 @@ class AIEngine:
             )
 
             if role == "assistant":
-
                 role = "model"
 
             elif role not in {
                 "user",
                 "model",
             }:
-
                 role = "user"
 
             contents.append(
@@ -443,12 +434,6 @@ class AIEngine:
                     ],
                 }
             )
-
-        # -------------------------------------------------
-        # Gemini 3.5
-        #
-        # Do not send temperature/top_p/top_k.
-        # -------------------------------------------------
 
         payload = {
 
@@ -491,7 +476,6 @@ class AIEngine:
                     )
 
                 try:
-
                     data = json.loads(
                         text
                     )
@@ -510,7 +494,6 @@ class AIEngine:
 
         if not candidates:
 
-            # حاول استخراج سبب الرفض بشكل أوضح
             prompt_feedback = data.get(
                 "promptFeedback"
             )
@@ -587,7 +570,7 @@ class AIEngine:
         return result
 
     # =====================================================
-    # OPENAI RESPONSES API
+    # OPENAI
     # =====================================================
 
     async def _openai(
@@ -674,7 +657,6 @@ class AIEngine:
                     )
 
                 try:
-
                     data = json.loads(
                         text
                     )
@@ -860,7 +842,6 @@ class AIEngine:
                     )
 
                 try:
-
                     data = json.loads(
                         text
                     )
@@ -935,7 +916,7 @@ class AIEngine:
 
         model = self.resolve_model(
             provider,
-            model
+            model,
         )
 
         if provider == "openai":
@@ -994,7 +975,7 @@ class AIEngine:
 
         model = self.resolve_model(
             provider,
-            model
+            model,
         )
 
         try:
@@ -1011,32 +992,23 @@ class AIEngine:
         except Exception as primary_error:
 
             if not self.fallback_enabled:
-
                 raise
 
-            fallback = (
-                self.fallback_provider
-            )
+            fallback = self.fallback_provider
 
             if fallback == provider:
-
                 raise
 
-            fallback_model = (
-                DEFAULT_MODELS.get(
-                    fallback
-                )
+            fallback_model = DEFAULT_MODELS.get(
+                fallback
             )
 
             if not fallback_model:
-
                 raise primary_error
 
-            fallback_model = (
-                self.resolve_model(
-                    fallback,
-                    fallback_model
-                )
+            fallback_model = self.resolve_model(
+                fallback,
+                fallback_model,
             )
 
             try:
@@ -1087,16 +1059,10 @@ class AIEngine:
 
         self.reload_keys()
 
-        # -------------------------------------------------
-        # Compatibility
-        # -------------------------------------------------
-
         if user_message is not None:
-
             prompt = user_message
 
         if prompt is None:
-
             raise ValueError(
                 "No user message was provided."
             )
@@ -1106,14 +1072,9 @@ class AIEngine:
         ).strip()
 
         if not prompt:
-
             raise ValueError(
                 "User message is empty."
             )
-
-        # -------------------------------------------------
-        # Mode
-        # -------------------------------------------------
 
         mode = (
             mode
@@ -1121,16 +1082,11 @@ class AIEngine:
         ).lower().strip()
 
         if mode not in MODES:
-
             mode = "normal"
 
         mode_config = self.get_mode(
             mode
         )
-
-        # -------------------------------------------------
-        # Character
-        # -------------------------------------------------
 
         character = self.db.get_character(
             guild_id,
@@ -1148,20 +1104,12 @@ class AIEngine:
                 f"{character_name}"
             )
 
-        # -------------------------------------------------
-        # System prompt
-        # -------------------------------------------------
-
         system_prompt = (
             self.build_system_prompt(
                 character_dict,
                 mode,
             )
         )
-
-        # -------------------------------------------------
-        # Provider
-        # -------------------------------------------------
 
         provider = (
             provider
@@ -1171,18 +1119,10 @@ class AIEngine:
             )
         ).lower().strip()
 
-        # -------------------------------------------------
-        # Model
-        # -------------------------------------------------
-
         model = self.resolve_model(
             provider,
-            model
+            model,
         )
-
-        # -------------------------------------------------
-        # History
-        # -------------------------------------------------
 
         history_rows = self.db.get_history(
             guild_id,
@@ -1237,10 +1177,6 @@ class AIEngine:
                         }
                     )
 
-        # -------------------------------------------------
-        # Current message
-        # -------------------------------------------------
-
         messages.append(
             {
                 "role": "user",
@@ -1255,10 +1191,6 @@ class AIEngine:
             f"character={character_name} | "
             f"mode={mode}"
         )
-
-        # -------------------------------------------------
-        # Request
-        # -------------------------------------------------
 
         response = (
             await self.request_with_fallback(
@@ -1280,14 +1212,9 @@ class AIEngine:
         ).strip()
 
         if not response:
-
             raise RuntimeError(
                 "AI returned an empty response."
             )
-
-        # -------------------------------------------------
-        # Save history
-        # -------------------------------------------------
 
         try:
 
@@ -1358,7 +1285,6 @@ class AIEngine:
         )
 
         if not history_rows:
-
             return "NO_ALERT"
 
         history_text = []
@@ -1390,7 +1316,6 @@ class AIEngine:
             )
 
         if not history_text:
-
             return "NO_ALERT"
 
         prompt = (
@@ -1426,7 +1351,7 @@ class AIEngine:
 
         model = self.resolve_model(
             provider,
-            model
+            model,
         )
 
         print(
@@ -1456,19 +1381,16 @@ class AIEngine:
         ).strip()
 
         if not response:
-
             return "NO_ALERT"
 
         if response.upper().startswith(
             "NO_ALERT"
         ):
-
             return "NO_ALERT"
 
         if response.upper().startswith(
             "ALERT:"
         ):
-
             return response
 
         return f"ALERT: {response}"
