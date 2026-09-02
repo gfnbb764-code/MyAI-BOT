@@ -16,7 +16,6 @@ DEFAULT_MODELS = {
 
 
 MODES = {
-
     "normal": {
         "name": "🤖 عادي",
         "temperature": 0.7,
@@ -55,23 +54,14 @@ MODES = {
 
 
 REPLY_TYPES = {
-
-    "mention":
-        "1️⃣ منشن البوت + كتابة الرسالة",
-
-    "channel":
-        "2️⃣ مباشرة داخل القناة المحددة",
-
-    "direct":
-        "3️⃣ يرد إذا كان الكلام موجهًا له",
-
-    "auto":
-        "4️⃣ تلقائي ذكي + تنبيهات ونصائح",
+    "mention": "1️⃣ منشن البوت + كتابة الرسالة",
+    "channel": "2️⃣ مباشرة داخل القناة المحددة",
+    "direct": "3️⃣ يرد إذا كان الكلام موجهًا له",
+    "auto": "4️⃣ تلقائي ذكي + تنبيهات ونصائح",
 }
 
 
 PERMISSION_PRESETS = {
-
     "chat": {
         "manage_server": False,
         "manage_channels": False,
@@ -110,9 +100,7 @@ SETUP_PRESETS = {
 class AIEngine:
 
     def __init__(self, db):
-
         self.db = db
-
         self.reload_keys()
 
     # ========================================================
@@ -182,10 +170,7 @@ class AIEngine:
     # System Prompt
     # ========================================================
 
-    def build_system_prompt(
-        self,
-        character
-    ):
+    def build_system_prompt(self, character):
 
         personality = character.get(
             "personality",
@@ -366,11 +351,8 @@ class AIEngine:
         }
 
         headers = {
-            "Authorization":
-                f"Bearer {self.openai_key}",
-
-            "Content-Type":
-                "application/json"
+            "Authorization": f"Bearer {self.openai_key}",
+            "Content-Type": "application/json"
         }
 
         timeout = aiohttp.ClientTimeout(
@@ -396,11 +378,25 @@ class AIEngine:
                         f"{data}"
                     )
 
-                return (
-                    data["choices"][0]
-                    ["message"]["content"]
-                    .strip()
+                choices = data.get(
+                    "choices",
+                    []
                 )
+
+                if not choices:
+                    return ""
+
+                message = choices[0].get(
+                    "message",
+                    {}
+                )
+
+                content = message.get(
+                    "content",
+                    ""
+                )
+
+                return content.strip()
 
     # ========================================================
     # Anthropic
@@ -420,7 +416,6 @@ class AIEngine:
             )
 
         system_parts = []
-
         chat_messages = []
 
         for message in messages:
@@ -444,7 +439,8 @@ class AIEngine:
         payload = {
             "model": model,
             "max_tokens": max_tokens,
-            "messages": chat_messages
+            "messages": chat_messages,
+            "temperature": temperature
         }
 
         if system_parts:
@@ -454,14 +450,9 @@ class AIEngine:
             )
 
         headers = {
-            "x-api-key":
-                self.anthropic_key,
-
-            "anthropic-version":
-                "2023-06-01",
-
-            "Content-Type":
-                "application/json"
+            "x-api-key": self.anthropic_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json"
         }
 
         timeout = aiohttp.ClientTimeout(
@@ -653,6 +644,7 @@ class AIEngine:
         )
 
         if not response:
+
             raise RuntimeError(
                 "AI returned an empty response."
             )
@@ -777,8 +769,11 @@ NO_ALERT
             context_lines
         )
 
-        messages = [
+        if not context.strip():
 
+            return None
+
+        messages = [
             {
                 "role": "system",
                 "content":
@@ -786,7 +781,6 @@ NO_ALERT
                     + "\n\n"
                     + proactive_prompt
             },
-
             {
                 "role": "user",
                 "content": (
@@ -825,26 +819,13 @@ NO_ALERT
         )
 
         if not response:
+
             return None
 
         response = response.strip()
 
         if response.upper() == "NO_ALERT":
+
             return None
-
-        return response            user_id,
-            character_name,
-            "user",
-            str(user_message)
-        )
-
-        self.database.add_message(
-            guild_id,
-            channel_id,
-            user_id,
-            character_name,
-            "assistant",
-            response
-        )
 
         return response
