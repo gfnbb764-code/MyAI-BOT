@@ -12,7 +12,7 @@ import aiohttp
 DEFAULT_PROVIDER = os.getenv(
     "PRIMARY_AI_PROVIDER",
     "openai",
-).lower()
+).lower().strip()
 
 DEFAULT_MODELS = {
     "openai": os.getenv(
@@ -125,7 +125,7 @@ class AIEngine:
         self.fallback_provider = os.getenv(
             "AI_FALLBACK_PROVIDER",
             "google",
-        ).lower()
+        ).lower().strip()
 
         self.reload_keys()
 
@@ -309,7 +309,6 @@ class AIEngine:
                 "user",
                 "model",
             }:
-
                 role = "user"
 
             contents.append(
@@ -317,9 +316,7 @@ class AIEngine:
                     "role": role,
                     "parts": [
                         {
-                            "text": str(
-                                content
-                            ),
+                            "text": str(content),
                         }
                     ],
                 }
@@ -365,9 +362,7 @@ class AIEngine:
 
                 try:
 
-                    data = json.loads(
-                        text
-                    )
+                    data = json.loads(text)
 
                 except json.JSONDecodeError:
 
@@ -401,10 +396,7 @@ class AIEngine:
                 )
             )
             for part in parts
-            if isinstance(
-                part,
-                dict
-            )
+            if isinstance(part, dict)
         ).strip()
 
         if not result:
@@ -471,11 +463,15 @@ class AIEngine:
                 }
             )
 
+        # IMPORTANT:
+        # gpt-5.6-luna does not accept temperature.
+        # Keep temperature for compatibility with the
+        # other providers, but do not send it to OpenAI.
+
         payload = {
             "model": model,
             "instructions": system_prompt,
             "input": input_messages,
-            "temperature": temperature,
             "max_output_tokens": max_tokens,
         }
 
@@ -505,9 +501,7 @@ class AIEngine:
 
                 try:
 
-                    data = json.loads(
-                        text
-                    )
+                    data = json.loads(text)
 
                 except json.JSONDecodeError:
 
@@ -521,10 +515,7 @@ class AIEngine:
         )
 
         if (
-            isinstance(
-                output_text,
-                str
-            )
+            isinstance(output_text, str)
             and output_text.strip()
         ):
 
@@ -537,10 +528,7 @@ class AIEngine:
 
         collected = []
 
-        if isinstance(
-            output,
-            list
-        ):
+        if isinstance(output, list):
 
             for item in output:
 
@@ -690,9 +678,7 @@ class AIEngine:
 
                 try:
 
-                    data = json.loads(
-                        text
-                    )
+                    data = json.loads(text)
 
                 except json.JSONDecodeError:
 
@@ -894,7 +880,6 @@ class AIEngine:
         # -------------------------------------------------
 
         if user_message is not None:
-
             prompt = user_message
 
         if prompt is None:
@@ -917,10 +902,6 @@ class AIEngine:
         # Mode
         # -------------------------------------------------
 
-        mode_config = self.get_mode(
-            mode
-        )
-
         mode = (
             mode
             or "normal"
@@ -928,6 +909,10 @@ class AIEngine:
 
         if mode not in MODES:
             mode = "normal"
+
+        mode_config = self.get_mode(
+            mode
+        )
 
         # -------------------------------------------------
         # Character
