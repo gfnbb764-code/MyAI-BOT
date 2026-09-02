@@ -1,3 +1,4 @@
+```python
 import os
 import json
 from typing import Optional, Dict, Any
@@ -90,14 +91,9 @@ class AIEngine:
 
         self.db = db
 
-        # API keys
         self.google_api_key = None
         self.openai_api_key = None
         self.anthropic_api_key = None
-
-        # -------------------------------------------------
-        # API endpoints
-        # -------------------------------------------------
 
         self.google_endpoint = os.getenv(
             "GOOGLE_API_ENDPOINT",
@@ -113,10 +109,6 @@ class AIEngine:
             "ANTHROPIC_API_ENDPOINT",
             "https://api.anthropic.com/v1/messages",
         )
-
-        # -------------------------------------------------
-        # Fallback
-        # -------------------------------------------------
 
         self.fallback_enabled = (
             os.getenv(
@@ -178,8 +170,6 @@ class AIEngine:
         except Exception:
             return None
 
-    # -----------------------------------------------------
-
     def get_mode(
         self,
         mode: Optional[str],
@@ -188,14 +178,12 @@ class AIEngine:
         mode = (
             mode
             or "normal"
-        ).lower()
+        ).lower().strip()
 
         if mode not in MODES:
             mode = "normal"
 
         return MODES[mode]
-
-    # -----------------------------------------------------
 
     def get_reply_type(
         self,
@@ -205,7 +193,7 @@ class AIEngine:
         reply_type = (
             reply_type
             or "mention"
-        ).lower()
+        ).lower().strip()
 
         if reply_type not in REPLY_TYPES:
             return "mention"
@@ -272,7 +260,9 @@ class AIEngine:
                 f"Additional instructions: {extra}"
             )
 
-        return "\n".join(prompt_parts)
+        return "\n".join(
+            prompt_parts
+        )
 
     # =====================================================
     # GOOGLE GEMINI
@@ -288,6 +278,7 @@ class AIEngine:
     ) -> str:
 
         if not self.google_api_key:
+
             raise RuntimeError(
                 "GOOGLE_API_KEY / GEMINI_API_KEY is not configured."
             )
@@ -319,6 +310,7 @@ class AIEngine:
                 "user",
                 "model",
             }:
+
                 role = "user"
 
             contents.append(
@@ -326,7 +318,9 @@ class AIEngine:
                     "role": role,
                     "parts": [
                         {
-                            "text": str(content),
+                            "text": str(
+                                content
+                            ),
                         }
                     ],
                 }
@@ -371,7 +365,10 @@ class AIEngine:
                     )
 
                 try:
-                    data = json.loads(text)
+
+                    data = json.loads(
+                        text
+                    )
 
                 except json.JSONDecodeError:
 
@@ -405,7 +402,10 @@ class AIEngine:
                 )
             )
             for part in parts
-            if isinstance(part, dict)
+            if isinstance(
+                part,
+                dict
+            )
         ).strip()
 
         if not result:
@@ -462,6 +462,7 @@ class AIEngine:
                 "user",
                 "assistant",
             }:
+
                 role = "user"
 
             input_messages.append(
@@ -504,7 +505,10 @@ class AIEngine:
                     )
 
                 try:
-                    data = json.loads(text)
+
+                    data = json.loads(
+                        text
+                    )
 
                 except json.JSONDecodeError:
 
@@ -513,23 +517,19 @@ class AIEngine:
                         f"{text[:1000]}"
                     )
 
-        # -------------------------------------------------
-        # Preferred Responses API output
-        # -------------------------------------------------
-
         output_text = data.get(
             "output_text"
         )
 
         if (
-            isinstance(output_text, str)
+            isinstance(
+                output_text,
+                str
+            )
             and output_text.strip()
         ):
-            return output_text.strip()
 
-        # -------------------------------------------------
-        # Fallback parser
-        # -------------------------------------------------
+            return output_text.strip()
 
         output = data.get(
             "output",
@@ -538,13 +538,16 @@ class AIEngine:
 
         collected = []
 
-        if isinstance(output, list):
+        if isinstance(
+            output,
+            list
+        ):
 
             for item in output:
 
                 if not isinstance(
                     item,
-                    dict,
+                    dict
                 ):
                     continue
 
@@ -555,7 +558,7 @@ class AIEngine:
 
                 if not isinstance(
                     content,
-                    list,
+                    list
                 ):
                     continue
 
@@ -563,7 +566,7 @@ class AIEngine:
 
                     if not isinstance(
                         block,
-                        dict,
+                        dict
                     ):
                         continue
 
@@ -583,8 +586,9 @@ class AIEngine:
 
                         if isinstance(
                             value,
-                            str,
+                            str
                         ):
+
                             collected.append(
                                 value
                             )
@@ -638,6 +642,7 @@ class AIEngine:
                 "user",
                 "assistant",
             }:
+
                 role = "user"
 
             anthropic_messages.append(
@@ -685,7 +690,10 @@ class AIEngine:
                     )
 
                 try:
-                    data = json.loads(text)
+
+                    data = json.loads(
+                        text
+                    )
 
                 except json.JSONDecodeError:
 
@@ -703,14 +711,14 @@ class AIEngine:
 
         if isinstance(
             content,
-            list,
+            list
         ):
 
             for block in content:
 
                 if not isinstance(
                     block,
-                    dict,
+                    dict
                 ):
                     continue
 
@@ -752,7 +760,7 @@ class AIEngine:
         provider = (
             provider
             or DEFAULT_PROVIDER
-        ).lower()
+        ).lower().strip()
 
         if provider == "openai":
 
@@ -805,7 +813,7 @@ class AIEngine:
         provider = (
             provider
             or DEFAULT_PROVIDER
-        ).lower()
+        ).lower().strip()
 
         try:
 
@@ -830,10 +838,8 @@ class AIEngine:
             if fallback == provider:
                 raise
 
-            fallback_model = (
-                DEFAULT_MODELS.get(
-                    fallback
-                )
+            fallback_model = DEFAULT_MODELS.get(
+                fallback
             )
 
             if not fallback_model:
@@ -844,9 +850,8 @@ class AIEngine:
                 print(
                     "[AIEngine] "
                     f"Primary provider '{provider}' "
-                    f"failed. "
-                    f"Trying fallback "
-                    f"'{fallback}'."
+                    "failed. "
+                    f"Trying fallback '{fallback}'."
                 )
 
                 return await self.request(
@@ -886,13 +891,7 @@ class AIEngine:
         self.reload_keys()
 
         # -------------------------------------------------
-        # Compatibility:
-        #
-        # main.py uses:
-        # user_message="..."
-        #
-        # Older code may use:
-        # prompt="..."
+        # Compatibility
         # -------------------------------------------------
 
         if user_message is not None:
@@ -905,7 +904,9 @@ class AIEngine:
                 "No user message was provided."
             )
 
-        prompt = str(prompt).strip()
+        prompt = str(
+            prompt
+        ).strip()
 
         if not prompt:
 
@@ -920,6 +921,14 @@ class AIEngine:
         mode_config = self.get_mode(
             mode
         )
+
+        mode = (
+            mode
+            or "normal"
+        ).lower().strip()
+
+        if mode not in MODES:
+            mode = "normal"
 
         # -------------------------------------------------
         # Character
@@ -962,7 +971,7 @@ class AIEngine:
                 "PRIMARY_AI_PROVIDER",
                 DEFAULT_PROVIDER,
             )
-        ).lower()
+        ).lower().strip()
 
         # -------------------------------------------------
         # Model
@@ -1041,7 +1050,7 @@ class AIEngine:
                     )
 
         # -------------------------------------------------
-        # Current user message
+        # Current message
         # -------------------------------------------------
 
         messages.append(
@@ -1050,10 +1059,6 @@ class AIEngine:
                 "content": prompt,
             }
         )
-
-        # -------------------------------------------------
-        # Debug
-        # -------------------------------------------------
 
         print(
             "[AIEngine] generate | "
@@ -1064,22 +1069,20 @@ class AIEngine:
         )
 
         # -------------------------------------------------
-        # Generate response
+        # Request
         # -------------------------------------------------
 
-        response = (
-            await self.request_with_fallback(
-                provider=provider,
-                model=model,
-                system_prompt=system_prompt,
-                messages=messages,
-                temperature=mode_config[
-                    "temperature"
-                ],
-                max_tokens=mode_config[
-                    "max_tokens"
-                ],
-            )
+        response = await self.request_with_fallback(
+            provider=provider,
+            model=model,
+            system_prompt=system_prompt,
+            messages=messages,
+            temperature=mode_config[
+                "temperature"
+            ],
+            max_tokens=mode_config[
+                "max_tokens"
+            ],
         )
 
         response = str(
@@ -1141,10 +1144,6 @@ class AIEngine:
 
         self.reload_keys()
 
-        # -------------------------------------------------
-        # Character
-        # -------------------------------------------------
-
         character = self.db.get_character(
             guild_id,
             character_name,
@@ -1161,10 +1160,6 @@ class AIEngine:
                 f"{character_name}"
             )
 
-        # -------------------------------------------------
-        # History
-        # -------------------------------------------------
-
         history_rows = self.db.get_history(
             guild_id,
             channel_id,
@@ -1173,7 +1168,6 @@ class AIEngine:
         )
 
         if not history_rows:
-
             return "NO_ALERT"
 
         history_text = []
@@ -1205,12 +1199,7 @@ class AIEngine:
             )
 
         if not history_text:
-
             return "NO_ALERT"
-
-        # -------------------------------------------------
-        # Proactive prompt
-        # -------------------------------------------------
 
         prompt = (
             "Analyze the recent Discord "
@@ -1223,12 +1212,10 @@ class AIEngine:
             "Only respond proactively when "
             "there is a useful reason.\n\n"
             "Conversation:\n"
-            + "\n".join(history_text)
+            + "\n".join(
+                history_text
+            )
         )
-
-        # -------------------------------------------------
-        # System prompt
-        # -------------------------------------------------
 
         system_prompt = (
             self.build_system_prompt(
@@ -1237,21 +1224,13 @@ class AIEngine:
             )
         )
 
-        # -------------------------------------------------
-        # Provider
-        # -------------------------------------------------
-
         provider = (
             provider
             or os.getenv(
                 "PRIMARY_AI_PROVIDER",
                 DEFAULT_PROVIDER,
             )
-        ).lower()
-
-        # -------------------------------------------------
-        # Model
-        # -------------------------------------------------
+        ).lower().strip()
 
         model = (
             model
@@ -1268,30 +1247,24 @@ class AIEngine:
                 f"provider: {provider}"
             )
 
-        # -------------------------------------------------
-        # Request
-        # -------------------------------------------------
-
         print(
             "[AIEngine] proactive | "
             f"provider={provider} | "
             f"model={model}"
         )
 
-        response = (
-            await self.request_with_fallback(
-                provider=provider,
-                model=model,
-                system_prompt=system_prompt,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-                ],
-                temperature=0.6,
-                max_tokens=300,
-            )
+        response = await self.request_with_fallback(
+            provider=provider,
+            model=model,
+            system_prompt=system_prompt,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            temperature=0.6,
+            max_tokens=300,
         )
 
         response = str(
@@ -1299,12 +1272,7 @@ class AIEngine:
         ).strip()
 
         if not response:
-
             return "NO_ALERT"
-
-        # -------------------------------------------------
-        # Normalize result
-        # -------------------------------------------------
 
         if response.upper().startswith(
             "NO_ALERT"
@@ -1318,6 +1286,5 @@ class AIEngine:
 
             return response
 
-        return (
-            f"ALERT: {response}"
-        )
+        return f"ALERT: {response}"
+```
