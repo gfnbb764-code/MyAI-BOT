@@ -38,7 +38,6 @@ AI_MODEL = os.getenv(
     "gemini-3.5-flash-lite"
 ).strip()
 
-
 if AI_PROVIDER not in {
     "openai",
     "google",
@@ -50,7 +49,6 @@ if AI_PROVIDER not in {
         "GOOGLE_MODEL",
         "gemini-3.5-flash-lite"
     ).strip()
-
 
 print(
     f"🤖 AI CONFIG | provider={AI_PROVIDER} | model={AI_MODEL}"
@@ -83,6 +81,30 @@ def get_ai_mode(config):
         mode = "normal"
 
     return mode
+
+
+# =========================================================
+# BOOLEAN HELPER
+# =========================================================
+
+def as_bool(value):
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        return value != 0
+
+    if value is None:
+        return False
+
+    return str(value).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+        "enabled"
+    }
 
 
 # =========================================================
@@ -418,7 +440,6 @@ async def send_ai_response(
 
     try:
 
-        # أول جزء = Reply حقيقي
         await message.reply(
             chunks[0],
             mention_author=False
@@ -595,19 +616,11 @@ def is_directed_to_bot(
     if bot.user is None:
         return False
 
-    # -----------------------------------------------------
-    # Mention
-    # -----------------------------------------------------
-
     if any(
         user.id == bot.user.id
         for user in message.mentions
     ):
         return True
-
-    # -----------------------------------------------------
-    # Reply to MyAI
-    # -----------------------------------------------------
 
     reference = getattr(
         message,
@@ -636,10 +649,6 @@ def is_directed_to_bot(
                 and author.id == bot.user.id
             ):
                 return True
-
-    # -----------------------------------------------------
-    # Name at beginning
-    # -----------------------------------------------------
 
     content = normalize_text(
         message.content
@@ -847,6 +856,17 @@ async def handle_auto_ai(
 
         return
 
+    if response.upper().startswith(
+        "ALERT:"
+    ):
+
+        response = response[
+            len("ALERT:"):
+        ].strip()
+
+    if not response:
+        return
+
     await send_ai_response(
         message,
         response
@@ -953,6 +973,69 @@ async def on_ready():
 
 
 # =========================================================
+# TEMP DEBUG - MESSAGE EDIT
+# =========================================================
+
+@bot.event
+async def on_message_edit(
+    before: discord.Message,
+    after: discord.Message
+):
+
+    try:
+
+        print(
+            "\n"
+            "🟡 MESSAGE EDIT EVENT RECEIVED\n"
+            f"👤 Author     : {after.author}\n"
+            f"🤖 Is Bot     : {after.author.bot}\n"
+            f"🏠 Server     : "
+            f"{after.guild.name if after.guild else 'DM'}\n"
+            f"💬 Channel    : "
+            f"{getattr(after.channel, 'name', after.channel)}\n"
+            f"🆔 Channel ID : {after.channel.id}\n"
+            f"📝 Before     : {before.content!r}\n"
+            f"📝 After      : {after.content!r}\n"
+        )
+
+    except Exception:
+
+        print(
+            "❌ Message edit debug error:"
+        )
+
+        traceback.print_exc()
+
+
+# =========================================================
+# TEMP DEBUG - RAW MESSAGE DELETE
+# =========================================================
+
+@bot.event
+async def on_raw_message_delete(
+    payload
+):
+
+    try:
+
+        print(
+            "\n"
+            "🔴 RAW MESSAGE DELETE EVENT RECEIVED\n"
+            f"🆔 Message ID : {payload.message_id}\n"
+            f"🆔 Channel ID : {payload.channel_id}\n"
+            f"🆔 Guild ID   : {payload.guild_id}\n"
+        )
+
+    except Exception:
+
+        print(
+            "❌ Message delete debug error:"
+        )
+
+        traceback.print_exc()
+
+
+# =========================================================
 # ON MESSAGE
 # =========================================================
 
@@ -962,30 +1045,61 @@ async def on_message(
 ):
 
     # =====================================================
-    # LOG THE ACTUAL EVENT
+    # DEBUG: EVENT RECEIVED
     # =====================================================
+
+    print(
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📩 NEW MESSAGE EVENT RECEIVED\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    )
 
     try:
 
         print(
-            "\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📩 NEW MESSAGE\n"
-            f"👤 Sender     : {message.author}\n"
-            f"🆔 Sender ID  : {message.author.id}\n"
-            f"🤖 Is Bot     : {message.author.bot}\n"
+            f"👤 Sender     : {message.author}"
+        )
+
+        print(
+            f"🆔 Sender ID  : {message.author.id}"
+        )
+
+        print(
+            f"🤖 Is Bot     : {message.author.bot}"
+        )
+
+        print(
             f"🏠 Server     : "
-            f"{message.guild.name if message.guild else 'DM'}\n"
+            f"{message.guild.name if message.guild else 'DM'}"
+        )
+
+        print(
             f"🆔 Server ID  : "
-            f"{message.guild.id if message.guild else None}\n"
+            f"{message.guild.id if message.guild else None}"
+        )
+
+        print(
             f"💬 Channel    : "
-            f"{getattr(message.channel, 'name', message.channel)}\n"
+            f"{getattr(message.channel, 'name', message.channel)}"
+        )
+
+        print(
             f"🆔 Channel ID : "
-            f"{message.channel.id}\n"
+            f"{message.channel.id}"
+        )
+
+        print(
             f"📝 Message    : "
-            f"{message.content!r}\n"
+            f"{message.content!r}"
+        )
+
+        print(
             f"🏷️ Mentions   : "
-            f"{[f'{u} ({u.id})' for u in message.mentions]}\n"
+            f"{[f'{u} ({u.id})' for u in message.mentions]}"
+        )
+
+        print(
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         )
 
@@ -1010,11 +1124,7 @@ async def on_message(
         return
 
     # =====================================================
-    # ONLY IGNORE MYAI ITSELF HERE
-    #
-    # IMPORTANT:
-    # Do NOT use message.author.bot here.
-    # Bot Chat needs to receive other bots.
+    # ONLY IGNORE MYAI ITSELF
     # =====================================================
 
     if (
@@ -1050,7 +1160,7 @@ async def on_message(
         config
     )
 
-    enabled = bool(
+    enabled = as_bool(
         config.get(
             "enabled",
             0
@@ -1104,8 +1214,6 @@ async def on_message(
 
     # =====================================================
     # OTHER BOT FILTER
-    #
-    # Bot Chat is the ONLY mode that accepts other bots.
     # =====================================================
 
     if (
@@ -1151,15 +1259,6 @@ async def on_message(
             "🎯 MODE = MENTION"
         )
 
-        if bot.user is None:
-
-            print(
-                "❌ bot.user is None."
-            )
-
-            return
-
-        # إذا تم اختيار روم، يلتزم Mention بالروم
         configured_channel = normalize_channel_id(
             config.get("channel_id")
         )
@@ -1312,6 +1411,23 @@ async def on_message(
             "🎯 MODE = DIRECT"
         )
 
+        configured_channel = normalize_channel_id(
+            config.get("channel_id")
+        )
+
+        if configured_channel is not None:
+
+            if not channel_matches(
+                message,
+                configured_channel
+            ):
+
+                print(
+                    "⏭️ Direct message outside configured channel."
+                )
+
+                return
+
         if not is_directed_to_bot(
             message
         ):
@@ -1365,6 +1481,23 @@ async def on_message(
             "🤖 MODE = AUTO"
         )
 
+        configured_channel = normalize_channel_id(
+            config.get("channel_id")
+        )
+
+        if configured_channel is not None:
+
+            if not channel_matches(
+                message,
+                configured_channel
+            ):
+
+                print(
+                    "⏭️ Auto message outside configured channel."
+                )
+
+                return
+
         try:
 
             await handle_auto_ai(
@@ -1393,9 +1526,22 @@ async def on_message(
             "🤖 MODE = BOT CHAT"
         )
 
-        # -------------------------------------------------
-        # Safety
-        # -------------------------------------------------
+        configured_channel = normalize_channel_id(
+            config.get("channel_id")
+        )
+
+        if configured_channel is not None:
+
+            if not channel_matches(
+                message,
+                configured_channel
+            ):
+
+                print(
+                    "⏭️ Bot Chat message outside configured channel."
+                )
+
+                return
 
         if not bot_chat_allowed(
             message.channel.id
@@ -1406,11 +1552,6 @@ async def on_message(
             )
 
             return
-
-        # -------------------------------------------------
-        # Bot Chat requires the message to be directed
-        # to MyAI.
-        # -------------------------------------------------
 
         directed = is_directed_to_bot(
             message
@@ -1903,7 +2044,7 @@ async def ai_setup(
         name="الحالة",
         value=(
             "🟢 مفعّل"
-            if bool(config.get("enabled", 0))
+            if as_bool(config.get("enabled", 0))
             else "🔴 معطّل"
         ),
         inline=True
@@ -2206,7 +2347,7 @@ async def ai_status(
         config
     )
 
-    enabled = bool(
+    enabled = as_bool(
         config.get(
             "enabled",
             0
