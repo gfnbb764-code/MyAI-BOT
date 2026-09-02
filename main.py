@@ -22,7 +22,7 @@ AUTO_COOLDOWN_SECONDS = 300
 
 # حماية Bot-to-Bot
 BOT_CHAT_MAX_REPLIES = 5
-BOT_CHAT_COOLDOWN_SECONDS = 15
+BOT_CHAT_COOLDOWN_SECONDS = 5
 
 
 # =========================================================
