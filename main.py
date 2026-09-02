@@ -57,6 +57,7 @@ class MyAIBot(commands.Bot):
         try:
             synced = await self.tree.sync()
             print(f"Synced {len(synced)} slash commands.")
+
         except Exception:
             print("❌ Failed to sync slash commands:")
             traceback.print_exc()
@@ -70,6 +71,7 @@ bot = MyAIBot()
 # =========================================================
 
 def get_config(guild_id: int):
+
     try:
         config = db.get_ai_config(guild_id)
 
@@ -84,15 +86,20 @@ def get_config(guild_id: int):
 
 
 def save_config(guild_id: int, **kwargs):
+
     return db.save_ai_config(
         guild_id,
         **kwargs
     )
 
 
-def get_character(guild_id: int, name: str = None):
+def get_character(
+    guild_id: int,
+    name: str = None
+):
 
     if name:
+
         character = db.get_character(
             guild_id,
             name
@@ -104,11 +111,17 @@ def get_character(guild_id: int, name: str = None):
     return None
 
 
-def get_active_character(guild_id: int, config):
+def get_active_character(
+    guild_id: int,
+    config
+):
 
-    character_name = config.get("character_name")
+    character_name = config.get(
+        "character_name"
+    )
 
     if character_name:
+
         character = get_character(
             guild_id,
             character_name
@@ -118,12 +131,16 @@ def get_active_character(guild_id: int, config):
             return character
 
     try:
-        characters = db.get_characters(guild_id)
+
+        characters = db.get_characters(
+            guild_id
+        )
 
         if characters:
             return dict(characters[0])
 
     except Exception:
+
         traceback.print_exc()
 
     return None
@@ -133,7 +150,10 @@ def get_active_character(guild_id: int, config):
 # MESSAGE SPLITTER
 # =========================================================
 
-def split_message(text: str, limit: int = 1900):
+def split_message(
+    text: str,
+    limit: int = 1900
+):
 
     if not text:
         return []
@@ -154,6 +174,7 @@ def split_message(text: str, limit: int = 1900):
         )
 
         if split_at <= 0:
+
             split_at = text.rfind(
                 " ",
                 0,
@@ -167,7 +188,9 @@ def split_message(text: str, limit: int = 1900):
             text[:split_at]
         )
 
-        text = text[split_at:].lstrip()
+        text = text[
+            split_at:
+        ].lstrip()
 
     if text:
         chunks.append(text)
@@ -184,11 +207,16 @@ async def send_ai_response(
     if not response:
         return
 
-    chunks = split_message(response)
+    chunks = split_message(
+        response
+    )
 
     for index, chunk in enumerate(chunks):
 
-        if reply_to is not None and index == 0:
+        if (
+            reply_to is not None
+            and index == 0
+        ):
 
             await reply_to.reply(
                 chunk,
@@ -197,14 +225,18 @@ async def send_ai_response(
 
         else:
 
-            await channel.send(chunk)
+            await channel.send(
+                chunk
+            )
 
 
 # =========================================================
 # PERMISSIONS
 # =========================================================
 
-def get_top_four_roles(guild: discord.Guild):
+def get_top_four_roles(
+    guild: discord.Guild
+):
 
     roles = [
         role
@@ -221,9 +253,14 @@ def get_top_four_roles(guild: discord.Guild):
     return roles[:4]
 
 
-def has_top_four_role(member: discord.Member):
+def has_top_four_role(
+    member: discord.Member
+):
 
-    if not isinstance(member, discord.Member):
+    if not isinstance(
+        member,
+        discord.Member
+    ):
         return False
 
     top_four = get_top_four_roles(
@@ -241,15 +278,25 @@ def has_top_four_role(member: discord.Member):
     )
 
 
-def can_control_bot(member: discord.Member):
+def can_control_bot(
+    member: discord.Member
+):
 
-    if not isinstance(member, discord.Member):
+    if not isinstance(
+        member,
+        discord.Member
+    ):
         return False
 
-    if member.id == member.guild.owner_id:
+    if (
+        member.id
+        == member.guild.owner_id
+    ):
         return True
 
-    return has_top_four_role(member)
+    return has_top_four_role(
+        member
+    )
 
 
 async def require_bot_control(
@@ -284,7 +331,9 @@ async def require_bot_control(
 # BOT MENTION
 # =========================================================
 
-def clean_bot_mention(content: str):
+def clean_bot_mention(
+    content: str
+):
 
     if not content:
         return ""
@@ -353,20 +402,27 @@ async def generate_chat_reply(
     if not user_message:
         return
 
+    character_name = character.get(
+        "name"
+    )
+
+    if not character_name:
+
+        raise ValueError(
+            "الشخصية لا تحتوي على اسم."
+        )
+
     async with message.channel.typing():
 
         response = await ai.generate(
             guild_id=message.guild.id,
+            channel_id=message.channel.id,
             user_id=message.author.id,
-            character=character,
+            character_name=character_name,
             user_message=user_message,
             mode=config.get(
                 "mode",
                 "normal"
-            ),
-            reply_type=config.get(
-                "reply_type",
-                "mention"
             )
         )
 
@@ -393,13 +449,23 @@ async def handle_auto_ai(
     guild_id = message.guild.id
     channel_id = message.channel.id
 
+    character_name = character.get(
+        "name"
+    )
+
+    if not character_name:
+        return
+
     key = (
         guild_id,
         channel_id
     )
 
     auto_message_counters[key] = (
-        auto_message_counters.get(key, 0) + 1
+        auto_message_counters.get(
+            key,
+            0
+        ) + 1
     )
 
     count = auto_message_counters[key]
@@ -416,7 +482,10 @@ async def handle_auto_ai(
         0
     )
 
-    if now - last_check < AUTO_COOLDOWN_SECONDS:
+    if (
+        now - last_check
+        < AUTO_COOLDOWN_SECONDS
+    ):
         return
 
     auto_last_check[key] = now
@@ -427,8 +496,8 @@ async def handle_auto_ai(
 
             response = await ai.generate_proactive(
                 guild_id=guild_id,
-                character=character,
-                channel_id=channel_id
+                channel_id=channel_id,
+                character_name=character_name
             )
 
         if not response:
@@ -496,10 +565,12 @@ async def ai_command(
     )
 
     if config is None:
+
         await interaction.response.send_message(
             "❌ تعذر تحميل إعدادات البوت.",
             ephemeral=True
         )
+
         return
 
     character = get_active_character(
@@ -508,11 +579,27 @@ async def ai_command(
     )
 
     if character is None:
+
         await interaction.response.send_message(
             "❌ لا توجد شخصية AI.\n"
-            "أنشئ شخصية أولاً باستخدام `/character_create`.",
+            "أنشئ شخصية أولاً باستخدام "
+            "`/character_create`.",
             ephemeral=True
         )
+
+        return
+
+    character_name = character.get(
+        "name"
+    )
+
+    if not character_name:
+
+        await interaction.response.send_message(
+            "❌ الشخصية الحالية غير صالحة.",
+            ephemeral=True
+        )
+
         return
 
     await interaction.response.defer()
@@ -521,14 +608,14 @@ async def ai_command(
 
         response = await ai.generate(
             guild_id=guild_id,
+            channel_id=interaction.channel.id,
             user_id=interaction.user.id,
-            character=character,
+            character_name=character_name,
             user_message=message,
             mode=config.get(
                 "mode",
                 "normal"
-            ),
-            reply_type="command"
+            )
         )
 
         if not response:
@@ -549,7 +636,10 @@ async def ai_command(
 
     except Exception:
 
-        print("❌ /ai error:")
+        print(
+            "❌ /ai error:"
+        )
+
         traceback.print_exc()
 
         await interaction.followup.send(
@@ -561,7 +651,9 @@ async def ai_command(
 # SETUP CHANNEL SELECT
 # =========================================================
 
-class SetupChannelSelect(discord.ui.ChannelSelect):
+class SetupChannelSelect(
+    discord.ui.ChannelSelect
+):
 
     def __init__(self):
 
@@ -601,7 +693,8 @@ class SetupChannelSelect(discord.ui.ChannelSelect):
         )
 
         await interaction.response.send_message(
-            f"✅ تم تحديد قناة الرد: {channel.mention}",
+            f"✅ تم تحديد قناة الرد: "
+            f"{channel.mention}",
             ephemeral=True
         )
 
@@ -610,9 +703,14 @@ class SetupChannelSelect(discord.ui.ChannelSelect):
 # SETUP VIEW
 # =========================================================
 
-class SetupView(discord.ui.View):
+class SetupView(
+    discord.ui.View
+):
 
-    def __init__(self, guild_id):
+    def __init__(
+        self,
+        guild_id
+    ):
 
         super().__init__(
             timeout=600
@@ -795,10 +893,12 @@ async def ai_setup(
     )
 
     if config is None:
+
         await interaction.response.send_message(
             "❌ تعذر تحميل إعدادات البوت.",
             ephemeral=True
         )
+
         return
 
     reply_type = config.get(
@@ -945,7 +1045,10 @@ async def character_create(
 
     except Exception as error:
 
-        print("❌ character_create error:")
+        print(
+            "❌ character_create error:"
+        )
+
         traceback.print_exc()
 
         await interaction.response.send_message(
@@ -992,13 +1095,19 @@ async def character_list(
             interaction.guild.id
         )
 
-        active = config.get(
-            "character_name"
-        ) if config else None
+        active = (
+            config.get(
+                "character_name"
+            )
+            if config
+            else None
+        )
 
         for character in characters:
 
-            character = dict(character)
+            character = dict(
+                character
+            )
 
             name = character.get(
                 "name",
@@ -1006,10 +1115,13 @@ async def character_list(
             )
 
             if name == active:
+
                 lines.append(
                     f"🟢 **{name}** — نشطة"
                 )
+
             else:
+
                 lines.append(
                     f"⚪ **{name}**"
                 )
@@ -1022,7 +1134,10 @@ async def character_list(
 
     except Exception:
 
-        print("❌ character_list error:")
+        print(
+            "❌ character_list error:"
+        )
+
         traceback.print_exc()
 
         await interaction.response.send_message(
@@ -1082,7 +1197,10 @@ async def character_use(
 
     except Exception:
 
-        print("❌ character_use error:")
+        print(
+            "❌ character_use error:"
+        )
+
         traceback.print_exc()
 
         await interaction.response.send_message(
@@ -1230,7 +1348,10 @@ async def ai_memory_clear(
 
     except Exception:
 
-        print("❌ ai_memory_clear error:")
+        print(
+            "❌ ai_memory_clear error:"
+        )
+
         traceback.print_exc()
 
         await interaction.response.send_message(
@@ -1248,13 +1369,16 @@ async def on_message(
     message: discord.Message
 ):
 
+    # تجاهل البوتات
     if message.author.bot:
         return
 
+    # أوامر prefix
     await bot.process_commands(
         message
     )
 
+    # الرسائل الخاصة
     if message.guild is None:
         return
 
@@ -1359,13 +1483,19 @@ async def on_message(
             return
 
         try:
+
             configured_channel = int(
                 configured_channel
             )
+
         except Exception:
+
             return
 
-        if message.channel.id != configured_channel:
+        if (
+            message.channel.id
+            != configured_channel
+        ):
             return
 
         content = message.content.strip()
@@ -1409,7 +1539,10 @@ async def on_message(
         )
 
         if not user_message:
-            user_message = message.content.strip()
+
+            user_message = (
+                message.content.strip()
+            )
 
         if not user_message:
             return
@@ -1470,7 +1603,9 @@ async def on_app_command_error(
     error: app_commands.AppCommandError
 ):
 
-    print("❌ Slash command error:")
+    print(
+        "❌ Slash command error:"
+    )
 
     traceback.print_exception(
         type(error),
@@ -1505,7 +1640,8 @@ async def on_app_command_error(
 if not TOKEN:
 
     raise RuntimeError(
-        "❌ DISCORD_TOKEN غير موجود في Environment Variables."
+        "❌ DISCORD_TOKEN غير موجود "
+        "في Environment Variables."
     )
 
 
@@ -1517,5 +1653,6 @@ finally:
 
     try:
         db.close()
+
     except Exception:
         pass
