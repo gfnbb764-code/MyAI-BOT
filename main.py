@@ -26,6 +26,68 @@ BOT_CHAT_COOLDOWN_SECONDS = 2
 
 
 # =========================================================
+# AI PROVIDER CONFIG
+# =========================================================
+
+AI_PROVIDER = os.getenv(
+    "PRIMARY_AI_PROVIDER",
+    "google",
+).lower().strip()
+
+AI_MODEL = os.getenv(
+    "GOOGLE_MODEL",
+    "gemini-2.5-flash-lite",
+).strip()
+
+if AI_PROVIDER not in {
+    "openai",
+    "google",
+    "anthropic",
+}:
+
+    AI_PROVIDER = "google"
+
+    AI_MODEL = os.getenv(
+        "GOOGLE_MODEL",
+        "gemini-2.5-flash-lite",
+    ).strip()
+
+print(
+    "🤖 AI CONFIG | "
+    f"provider={AI_PROVIDER} | "
+    f"model={AI_MODEL}"
+)
+
+
+# =========================================================
+# AI MODES
+# =========================================================
+
+AI_MODES = {
+    "normal",
+    "friendly",
+    "active",
+    "fun",
+    "professional",
+}
+
+
+def get_ai_mode(config):
+
+    mode = str(
+        config.get(
+            "mode",
+            "normal",
+        )
+    ).lower().strip()
+
+    if mode not in AI_MODES:
+        mode = "normal"
+
+    return mode
+
+
+# =========================================================
 # INTENTS
 # =========================================================
 
@@ -62,9 +124,10 @@ bot_chat_last_reply = {}
 class MyAIBot(commands.Bot):
 
     def __init__(self):
+
         super().__init__(
             command_prefix="!",
-            intents=intents
+            intents=intents,
         )
 
     async def setup_hook(self):
@@ -534,6 +597,7 @@ def is_directed_to_bot(
                 resolved_author is not None
                 and resolved_author.id == bot.user.id
             ):
+
                 return True
 
     content = normalize_text(
@@ -618,33 +682,9 @@ async def generate_chat_reply(
     user_message
 ):
 
-    # -----------------------------------------------------
-    # IMPORTANT:
-    # provider/model are intentionally fixed here.
-    #
-    # reply_type controls HOW the bot responds.
-    # It must NOT be used as the AI mode.
-    # -----------------------------------------------------
-
-    provider = "openai"
-    model = "gpt-5.6-luna"
-
-    mode = str(
-        config.get(
-            "mode",
-            "normal"
-        )
-    ).lower().strip()
-
-    if mode not in {
-        "normal",
-        "friendly",
-        "active",
-        "fun",
-        "professional"
-    }:
-
-        mode = "normal"
+    provider = AI_PROVIDER
+    model = AI_MODEL
+    mode = get_ai_mode(config)
 
     character_name = character.get(
         "name"
@@ -763,8 +803,8 @@ async def handle_auto_ai(
         character_name=character.get(
             "name"
         ),
-        provider="openai",
-        model="gpt-5.6-luna"
+        provider=AI_PROVIDER,
+        model=AI_MODEL
     )
 
     if not response:
@@ -923,6 +963,16 @@ async def on_ready():
         f"cooldown={BOT_CHAT_COOLDOWN_SECONDS}s"
     )
 
+    print(
+        "🤖 Active AI Provider | "
+        f"{AI_PROVIDER}"
+    )
+
+    print(
+        "🧠 Active AI Model | "
+        f"{AI_MODEL}"
+    )
+
 
 # =========================================================
 # ON MESSAGE
@@ -1070,8 +1120,8 @@ async def on_message(
         f"reply_type={reply_type} | "
         f"channel_id={config.get('channel_id')} | "
         f"character={config.get('character_name')} | "
-        f"provider=OpenAI | "
-        f"model=gpt-5.6-luna | "
+        f"provider={AI_PROVIDER} | "
+        f"model={AI_MODEL} | "
         f"mode={config.get('mode', 'normal')}"
     )
 
@@ -1566,25 +1616,9 @@ async def ai_command(
             "name"
         )
 
-        provider = "openai"
-        model = "gpt-5.6-luna"
-
-        mode = str(
-            config.get(
-                "mode",
-                "normal"
-            )
-        ).lower().strip()
-
-        if mode not in {
-            "normal",
-            "friendly",
-            "active",
-            "fun",
-            "professional"
-        }:
-
-            mode = "normal"
+        provider = AI_PROVIDER
+        model = AI_MODEL
+        mode = get_ai_mode(config)
 
         print(
             "🧠 /ai REQUEST | "
@@ -1623,13 +1657,41 @@ async def ai_command(
                 chunk
             )
 
-    except Exception:
+    except Exception as error:
 
         print(
             "❌ /ai error:"
         )
 
         traceback.print_exc()
+
+        error_text = str(
+            error
+        ).lower()
+
+        if (
+            "quota" in error_text
+            or "credit_balance_exhausted" in error_text
+            or "insufficient_quota" in error_text
+        ):
+
+            await interaction.followup.send(
+                "⚠️ رصيد مزود الذكاء الاصطناعي غير متاح حاليًا."
+            )
+
+            return
+
+        if (
+            "gemini_api_key" in error_text
+            or "google_api_key" in error_text
+            or "not configured" in error_text
+        ):
+
+            await interaction.followup.send(
+                "⚠️ مفتاح Gemini API غير مضبوط في إعدادات الاستضافة."
+            )
+
+            return
 
         await interaction.followup.send(
             "❌ حدث خطأ أثناء تشغيل الذكاء الاصطناعي."
@@ -2026,13 +2088,19 @@ async def ai_setup(
 
     embed.add_field(
         name="Provider",
-        value="OpenAI",
+        value=AI_PROVIDER.title(),
         inline=True
     )
 
     embed.add_field(
         name="Model",
-        value="gpt-5.6-luna",
+        value=AI_MODEL,
+        inline=True
+    )
+
+    embed.add_field(
+        name="Mode",
+        value=get_ai_mode(config),
         inline=True
     )
 
@@ -2360,24 +2428,19 @@ async def ai_status(
 
     embed.add_field(
         name="Provider",
-        value="OpenAI",
+        value=AI_PROVIDER.title(),
         inline=True
     )
 
     embed.add_field(
         name="Model",
-        value="gpt-5.6-luna",
+        value=AI_MODEL,
         inline=True
     )
 
     embed.add_field(
         name="Mode",
-        value=str(
-            config.get(
-                "mode",
-                "normal"
-            )
-        ),
+        value=get_ai_mode(config),
         inline=True
     )
 
