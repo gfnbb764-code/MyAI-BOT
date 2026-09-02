@@ -1,5 +1,4 @@
 import os
-import asyncio
 import discord
 
 from discord import app_commands
@@ -47,7 +46,6 @@ intents.message_content = True
 class MyAIBot(commands.Bot):
 
     def __init__(self):
-
         super().__init__(
             command_prefix="!",
             intents=intents
@@ -56,7 +54,6 @@ class MyAIBot(commands.Bot):
     async def setup_hook(self):
 
         try:
-
             synced = await self.tree.sync()
 
             print(
@@ -64,7 +61,6 @@ class MyAIBot(commands.Bot):
             )
 
         except Exception as e:
-
             print(
                 f"❌ فشل مزامنة الأوامر: {e}"
             )
@@ -82,21 +78,13 @@ async def on_ready():
 
     print("=" * 60)
 
-    print(
-        "🤖 MyAI اشتغل بنجاح!"
-    )
+    print("🤖 MyAI اشتغل بنجاح!")
 
-    print(
-        f"👤 الحساب: {bot.user}"
-    )
+    print(f"👤 الحساب: {bot.user}")
 
-    print(
-        f"🆔 ID: {bot.user.id}"
-    )
+    print(f"🆔 ID: {bot.user.id}")
 
-    print(
-        f"🌐 السيرفرات: {len(bot.guilds)}"
-    )
+    print(f"🌐 السيرفرات: {len(bot.guilds)}")
 
     print("=" * 60)
 
@@ -139,7 +127,6 @@ def split_message(
     chunks = []
 
     while text:
-
         chunks.append(
             text[:limit]
         )
@@ -730,9 +717,7 @@ async def ai_memory_clear(
 # SETUP VIEW
 # ==========================================================
 
-class SetupView(
-    discord.ui.View
-):
+class SetupView(discord.ui.View):
 
     def __init__(
         self,
@@ -745,9 +730,31 @@ class SetupView(
 
         self.guild_id = guild_id
 
-    # ------------------------------------------------------
+        # ==================================================
+        # CHANNEL SELECT
+        # ==================================================
+
+        self.channel_selector = discord.ui.ChannelSelect(
+            placeholder="📺 اختر قناة AI",
+            channel_types=[
+                discord.ChannelType.text
+            ],
+            min_values=1,
+            max_values=1,
+            row=3
+        )
+
+        self.channel_selector.callback = (
+            self.channel_select_callback
+        )
+
+        self.add_item(
+            self.channel_selector
+        )
+
+    # ======================================================
     # ENABLE
-    # ------------------------------------------------------
+    # ======================================================
 
     @discord.ui.button(
         label="تشغيل AI",
@@ -780,9 +787,9 @@ class SetupView(
             ephemeral=True
         )
 
-    # ------------------------------------------------------
+    # ======================================================
     # DISABLE
-    # ------------------------------------------------------
+    # ======================================================
 
     @discord.ui.button(
         label="إيقاف AI",
@@ -815,9 +822,9 @@ class SetupView(
             ephemeral=True
         )
 
-    # ------------------------------------------------------
+    # ======================================================
     # MODE
-    # ------------------------------------------------------
+    # ======================================================
 
     @discord.ui.select(
         placeholder="🎛️ اختر نمط AI",
@@ -878,9 +885,9 @@ class SetupView(
             ephemeral=True
         )
 
-    # ------------------------------------------------------
+    # ======================================================
     # REPLY TYPE
-    # ------------------------------------------------------
+    # ======================================================
 
     @discord.ui.select(
         placeholder="💬 اختر طريقة الرد",
@@ -931,21 +938,13 @@ class SetupView(
             ephemeral=True
         )
 
-    # ------------------------------------------------------
-    # CHANNEL SELECT
-    # ------------------------------------------------------
+    # ======================================================
+    # CHANNEL SELECT CALLBACK
+    # ======================================================
 
-    @discord.ui.channel_select(
-        placeholder="📺 اختر قناة AI",
-        channel_types=[
-            discord.ChannelType.text
-        ],
-        row=3
-    )
-    async def channel_select(
+    async def channel_select_callback(
         self,
-        interaction: discord.Interaction,
-        select: discord.ui.ChannelSelect
+        interaction: discord.Interaction
     ):
 
         if not interaction.user.guild_permissions.manage_guild:
@@ -957,7 +956,7 @@ class SetupView(
 
             return
 
-        channel = select.values[0]
+        channel = self.channel_selector.values[0]
 
         db.set_ai_channel(
             self.guild_id,
@@ -979,11 +978,9 @@ async def on_message(
     message: discord.Message
 ):
 
-    # تجاهل البوتات
     if message.author.bot:
         return
 
-    # تجاهل الخاص
     if not message.guild:
         return
 
@@ -993,9 +990,12 @@ async def on_message(
         guild_id
     )
 
-    # AI غير مفعّل
     if not config.get("enabled"):
-        await bot.process_commands(message)
+
+        await bot.process_commands(
+            message
+        )
+
         return
 
     reply_type = config.get(
@@ -1003,7 +1003,6 @@ async def on_message(
         "mention"
     )
 
-    # بالأمر فقط
     if reply_type == "command":
 
         await bot.process_commands(
@@ -1012,9 +1011,9 @@ async def on_message(
 
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # CHARACTER
-    # ------------------------------------------------------
+    # ======================================================
 
     character_name = (
         config.get(
@@ -1036,9 +1035,9 @@ async def on_message(
 
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # CHANNEL MODE
-    # ------------------------------------------------------
+    # ======================================================
 
     if reply_type == "channel":
 
@@ -1047,9 +1046,11 @@ async def on_message(
         )
 
         if not configured_channel:
+
             await bot.process_commands(
                 message
             )
+
             return
 
         if message.channel.id != configured_channel:
@@ -1062,9 +1063,9 @@ async def on_message(
 
         user_text = message.content.strip()
 
-    # ------------------------------------------------------
+    # ======================================================
     # MENTION MODE
-    # ------------------------------------------------------
+    # ======================================================
 
     elif reply_type == "mention":
 
@@ -1111,9 +1112,9 @@ async def on_message(
 
         return
 
-    # ------------------------------------------------------
-    # TYPING
-    # ------------------------------------------------------
+    # ======================================================
+    # TYPING + AI
+    # ======================================================
 
     try:
 
