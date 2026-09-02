@@ -294,6 +294,13 @@ class Database:
                 for row in columns
             }
 
+            # مهم:
+            # SQLite لا يسمح بـ DEFAULT CURRENT_TIMESTAMP
+            # عند ALTER TABLE ADD COLUMN.
+            #
+            # لذلك أعمدة الوقت تتم إضافتها بدون DEFAULT
+            # ثم يتم ملؤها لاحقًا باستخدام UPDATE.
+
             guild_missing = {
                 "active_character": "TEXT",
                 "active_provider": "TEXT DEFAULT 'google'",
@@ -303,8 +310,8 @@ class Database:
                 "ai_mode": "TEXT DEFAULT 'normal'",
                 "reply_type": "TEXT DEFAULT 'mention'",
                 "permission_preset": "TEXT DEFAULT 'chat'",
-                "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-                "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                "created_at": "TIMESTAMP",
+                "updated_at": "TIMESTAMP"
             }
 
             for column_name, definition in guild_missing.items():
@@ -350,7 +357,7 @@ class Database:
                 "allow_management": "INTEGER DEFAULT 0",
                 "allow_channel_management": "INTEGER DEFAULT 0",
                 "allow_role_management": "INTEGER DEFAULT 0",
-                "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                "updated_at": "TIMESTAMP"
             }
 
             for column_name, definition in ai_missing.items():
@@ -370,7 +377,7 @@ class Database:
                     )
 
             # --------------------------------------------------
-            # إصلاح القيم القديمة
+            # إصلاح قيم guild_settings
             # --------------------------------------------------
 
             cursor.execute("""
@@ -411,6 +418,22 @@ class Database:
                 SET permission_preset = 'chat'
                 WHERE permission_preset IS NULL
             """)
+
+            cursor.execute("""
+                UPDATE guild_settings
+                SET created_at = CURRENT_TIMESTAMP
+                WHERE created_at IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE guild_settings
+                SET updated_at = CURRENT_TIMESTAMP
+                WHERE updated_at IS NULL
+            """)
+
+            # --------------------------------------------------
+            # إصلاح قيم ai_config
+            # --------------------------------------------------
 
             cursor.execute("""
                 UPDATE ai_config
@@ -467,6 +490,12 @@ class Database:
                 UPDATE ai_config
                 SET allow_role_management = 0
                 WHERE allow_role_management IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE ai_config
+                SET updated_at = CURRENT_TIMESTAMP
+                WHERE updated_at IS NULL
             """)
 
             self.conn.commit()
@@ -850,7 +879,6 @@ class Database:
         )
 
         def value(new, old):
-
             return old if new is None else new
 
         enabled = value(
