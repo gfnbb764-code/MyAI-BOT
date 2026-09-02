@@ -1,983 +1,86 @@
 import os
+import asyncio
 import discord
-from discord.ext import commands
+
 from discord import app_commands
+from discord.ext import commands
 
 from database import Database
 from ai_engine import AIEngine
 
 
-# ============================================================
-# BOT
-# ============================================================
+# ==========================================================
+# CONFIG
+# ==========================================================
 
-intents = discord.Intents.default()
+TOKEN = os.getenv("DISCORD_TOKEN")
 
-intents.message_content = True
+if not TOKEN:
+    raise RuntimeError(
+        "DISCORD_TOKEN غير موجود في Environment Variables."
+    )
 
-intents.members = True
 
-bot = commands.Bot(
-    command_prefix="!",
-    intents=intents
-)
+# ==========================================================
+# DATABASE + AI
+# ==========================================================
 
 db = Database()
-
 ai = AIEngine(db)
 
 
-# ============================================================
-# SERVER CONFIG MEMORY
-# ============================================================
+# ==========================================================
+# DISCORD INTENTS
+# ==========================================================
 
-SERVER_CONFIG = {}
+intents = discord.Intents.default()
 
-
-def get_config(guild_id):
-
-    if guild_id not in SERVER_CONFIG:
-
-        SERVER_CONFIG[guild_id] = {
-
-            "enabled": False,
-
-            "channel_id": None,
-
-            "mode": "normal",
-
-            "reply_type": "mention",
-
-            "character": None,
-
-            "permissions": "chat"
-        }
-
-    return SERVER_CONFIG[guild_id]
+intents.guilds = True
+intents.messages = True
+intents.message_content = True
 
 
-# ============================================================
-# EMBED
-# ============================================================
+# ==========================================================
+# BOT
+# ==========================================================
 
-def setup_embed(guild):
+class MyAIBot(commands.Bot):
 
-    config = get_config(
-        guild.id
-    )
-
-    mode = ai.get_mode(
-        config["mode"]
-    )
-
-    reply = ai.get_reply_type(
-        config["reply_type"]
-    )
-
-    channel = (
-        f"<#{config['channel_id']}>"
-        if config["channel_id"]
-        else "❌ لم يتم التحديد"
-    )
-
-    character = (
-        config["character"]
-        or "❌ لم يتم التحديد"
-    )
-
-    embed = discord.Embed(
-        title="🤖 MyAI • لوحة التحكم",
-        description=(
-            "### ⚡ إعداد الذكاء الاصطناعي\n"
-            "استخدم الأزرار والقوائم بالأسفل "
-            "لتخصيص MyAI بسهولة.\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"🟢 **الحالة:** "
-            f"{'مفعل' if config['enabled'] else 'متوقف'}\n"
-            f"📢 **القناة:** {channel}\n"
-            f"🎭 **الشخصية:** `{character}`\n"
-            f"🎛️ **النمط:** {mode['name']}\n"
-            f"💬 **الرد:** {reply['name']}\n"
-            f"🛡️ **الصلاحيات:** "
-            f"`{config['permissions']}`"
-        ),
-        color=discord.Color.blurple()
-    )
-
-    embed.set_footer(
-        text="MyAI • AI Server Control"
-    )
-
-    return embed
-
-
-# ============================================================
-# SETUP VIEW
-# ============================================================
-
-class AISetupView(
-    discord.ui.View
-):
-
-    def __init__(self, guild):
+    def __init__(self):
 
         super().__init__(
-            timeout=300
+            command_prefix="!",
+            intents=intents
         )
 
-        self.guild = guild
-
-    # --------------------------------------------------------
-    # ENABLE
-    # --------------------------------------------------------
-
-    @discord.ui.button(
-        label="تشغيل AI",
-        emoji="🟢",
-        style=discord.ButtonStyle.success,
-        row=0
-    )
-    async def enable(
-        self,
-        interaction,
-        button
-    ):
-
-        config = get_config(
-            self.guild.id
-        )
-
-        config["enabled"] = True
-
-        await interaction.response.edit_message(
-            embed=setup_embed(
-                self.guild
-            ),
-            view=self
-        )
-
-    # --------------------------------------------------------
-    # DISABLE
-    # --------------------------------------------------------
-
-    @discord.ui.button(
-        label="إيقاف",
-        emoji="🔴",
-        style=discord.ButtonStyle.danger,
-        row=0
-    )
-    async def disable(
-        self,
-        interaction,
-        button
-    ):
-
-        config = get_config(
-            self.guild.id
-        )
-
-        config["enabled"] = False
-
-        await interaction.response.edit_message(
-            embed=setup_embed(
-                self.guild
-            ),
-            view=self
-        )
-
-    # --------------------------------------------------------
-    # CHANNEL
-    # --------------------------------------------------------
-
-    @discord.ui.button(
-        label="اختيار القناة",
-        emoji="📢",
-        style=discord.ButtonStyle.primary,
-        row=1
-    )
-    async def channel(
-        self,
-        interaction,
-        button
-    ):
-
-        await interaction.response.send_message(
-            "📢 **اختر قناة الذكاء الاصطناعي:**",
-            view=ChannelView(
-                self.guild
-            ),
-            ephemeral=True
-        )
-
-    # --------------------------------------------------------
-    # MODE
-    # --------------------------------------------------------
-
-    @discord.ui.button(
-        label="نوع AI",
-        emoji="🎛️",
-        style=discord.ButtonStyle.primary,
-        row=1
-    )
-    async def mode(
-        self,
-        interaction,
-        button
-    ):
-
-        await interaction.response.send_message(
-            "🎛️ **اختر نمط الذكاء الاصطناعي:**",
-            view=ModeView(
-                self.guild
-            ),
-            ephemeral=True
-        )
-
-    # --------------------------------------------------------
-    # CHARACTER
-    # --------------------------------------------------------
-
-    @discord.ui.button(
-        label="الشخصية",
-        emoji="🎭",
-        style=discord.ButtonStyle.primary,
-        row=2
-    )
-    async def character(
-        self,
-        interaction,
-        button
-    ):
-
-        await interaction.response.send_message(
-            "🎭 **اختر الشخصية:**",
-            view=CharacterView(
-                self.guild
-            ),
-            ephemeral=True
-        )
-
-    # --------------------------------------------------------
-    # REPLY
-    # --------------------------------------------------------
-
-    @discord.ui.button(
-        label="نوع الرد",
-        emoji="💬",
-        style=discord.ButtonStyle.secondary,
-        row=2
-    )
-    async def reply(
-        self,
-        interaction,
-        button
-    ):
-
-        await interaction.response.send_message(
-            "💬 **اختر طريقة الرد:**",
-            view=ReplyView(
-                self.guild
-            ),
-            ephemeral=True
-        )
-
-    # --------------------------------------------------------
-    # PERMISSIONS
-    # --------------------------------------------------------
-
-    @discord.ui.button(
-        label="الصلاحيات",
-        emoji="🛡️",
-        style=discord.ButtonStyle.secondary,
-        row=3
-    )
-    async def permissions(
-        self,
-        interaction,
-        button
-    ):
-
-        await interaction.response.send_message(
-            "🛡️ **اختر مستوى الصلاحيات:**",
-            view=PermissionView(
-                self.guild
-            ),
-            ephemeral=True
-        )
-
-
-# ============================================================
-# CHANNEL SELECT
-# ============================================================
-
-class ChannelSelect(
-    discord.ui.ChannelSelect
-):
-
-    def __init__(self, guild):
-
-        super().__init__(
-            placeholder="📢 اختر قناة AI",
-            channel_types=[
-                discord.ChannelType.text
-            ]
-        )
-
-        self.guild = guild
-
-    async def callback(
-        self,
-        interaction
-    ):
-
-        channel = self.values[0]
-
-        config = get_config(
-            self.guild.id
-        )
-
-        config["channel_id"] = channel.id
-
-        await interaction.response.send_message(
-            f"✅ تم تحديد قناة AI:\n"
-            f"{channel.mention}",
-            ephemeral=True
-        )
-
-
-class ChannelView(
-    discord.ui.View
-):
-
-    def __init__(self, guild):
-
-        super().__init__(
-            timeout=120
-        )
-
-        self.add_item(
-            ChannelSelect(guild)
-        )
-
-
-# ============================================================
-# MODE SELECT
-# ============================================================
-
-class ModeSelect(
-    discord.ui.Select
-):
-
-    def __init__(self, guild):
-
-        self.guild = guild
-
-        options = []
-
-        for key, data in ai.MODES.items():
-
-            options.append(
-                discord.SelectOption(
-                    label=data["name"],
-                    value=key,
-                    description=data[
-                        "description"
-                    ][:100]
-                )
-            )
-
-        super().__init__(
-            placeholder="🎛️ اختر نمط AI",
-            options=options
-        )
-
-    async def callback(
-        self,
-        interaction
-    ):
-
-        selected = self.values[0]
-
-        config = get_config(
-            self.guild.id
-        )
-
-        config["mode"] = selected
-
-        await interaction.response.send_message(
-            f"✅ تم اختيار:\n"
-            f"**{ai.MODES[selected]['name']}**",
-            ephemeral=True
-        )
-
-
-class ModeView(
-    discord.ui.View
-):
-
-    def __init__(self, guild):
-
-        super().__init__(
-            timeout=120
-        )
-
-        self.add_item(
-            ModeSelect(guild)
-        )
-
-
-# ============================================================
-# REPLY SELECT
-# ============================================================
-
-class ReplySelect(
-    discord.ui.Select
-):
-
-    def __init__(self, guild):
-
-        self.guild = guild
-
-        options = []
-
-        for key, data in ai.REPLY_TYPES.items():
-
-            options.append(
-                discord.SelectOption(
-                    label=data["name"],
-                    value=key,
-                    description=data[
-                        "description"
-                    ]
-                )
-            )
-
-        super().__init__(
-            placeholder="💬 اختر طريقة الرد",
-            options=options
-        )
-
-    async def callback(
-        self,
-        interaction
-    ):
-
-        selected = self.values[0]
-
-        config = get_config(
-            self.guild.id
-        )
-
-        config["reply_type"] = selected
-
-        await interaction.response.send_message(
-            f"✅ تم اختيار:\n"
-            f"**{ai.REPLY_TYPES[selected]['name']}**",
-            ephemeral=True
-        )
-
-
-class ReplyView(
-    discord.ui.View
-):
-
-    def __init__(self, guild):
-
-        super().__init__(
-            timeout=120
-        )
-
-        self.add_item(
-            ReplySelect(guild)
-        )
-
-
-# ============================================================
-# PERMISSION SELECT
-# ============================================================
-
-class PermissionSelect(
-    discord.ui.Select
-):
-
-    def __init__(self, guild):
-
-        self.guild = guild
-
-        options = []
-
-        for key, data in ai.PERMISSION_PRESETS.items():
-
-            options.append(
-                discord.SelectOption(
-                    label=data["name"],
-                    value=key,
-                    description=data[
-                        "description"
-                    ]
-                )
-            )
-
-        super().__init__(
-            placeholder="🛡️ اختر الصلاحيات",
-            options=options
-        )
-
-    async def callback(
-        self,
-        interaction
-    ):
-
-        selected = self.values[0]
-
-        config = get_config(
-            self.guild.id
-        )
-
-        config["permissions"] = selected
-
-        await interaction.response.send_message(
-            f"✅ تم اختيار الصلاحيات:\n"
-            f"**{ai.PERMISSION_PRESETS[selected]['name']}**",
-            ephemeral=True
-        )
-
-
-class PermissionView(
-    discord.ui.View
-):
-
-    def __init__(self, guild):
-
-        super().__init__(
-            timeout=120
-        )
-
-        self.add_item(
-            PermissionSelect(guild)
-        )
-
-
-# ============================================================
-# CHARACTER SELECT
-# ============================================================
-
-class CharacterSelect(
-    discord.ui.Select
-):
-
-    def __init__(self, guild):
-
-        self.guild = guild
-
-        rows = db.get_characters(
-            guild.id
-        )
-
-        options = []
-
-        for row in rows[:25]:
-
-            row = ai.row_to_dict(
-                row
-            )
-
-            options.append(
-                discord.SelectOption(
-                    label=row.get(
-                        "name",
-                        "Character"
-                    )[:100],
-                    value=row.get(
-                        "name",
-                        "Character"
-                    )[:100]
-                )
-            )
-
-        if not options:
-
-            options.append(
-                discord.SelectOption(
-                    label="لا توجد شخصيات",
-                    value="none",
-                    description=(
-                        "أنشئ شخصية أولًا."
-                    )
-                )
-            )
-
-        super().__init__(
-            placeholder="🎭 اختر شخصية",
-            options=options
-        )
-
-    async def callback(
-        self,
-        interaction
-    ):
-
-        selected = self.values[0]
-
-        if selected == "none":
-
-            await interaction.response.send_message(
-                "❌ لا توجد شخصيات.",
-                ephemeral=True
-            )
-
-            return
-
-        config = get_config(
-            self.guild.id
-        )
-
-        config["character"] = selected
-
-        await interaction.response.send_message(
-            f"✅ الشخصية الحالية:\n"
-            f"🎭 **{selected}**",
-            ephemeral=True
-        )
-
-
-class CharacterView(
-    discord.ui.View
-):
-
-    def __init__(self, guild):
-
-        super().__init__(
-            timeout=120
-        )
-
-        self.add_item(
-            CharacterSelect(guild)
-        )
-
-
-# ============================================================
-# CHARACTER CREATE MODAL
-# ============================================================
-
-class CharacterModal(
-    discord.ui.Modal,
-    title="🎭 إنشاء شخصية AI"
-):
-
-    name = discord.ui.TextInput(
-        label="اسم الشخصية",
-        placeholder="مثال: سالم",
-        max_length=50
-    )
-
-    personality = discord.ui.TextInput(
-        label="شخصية AI",
-        placeholder=(
-            "مثال: مرح، ذكي، يحب مساعدة الأعضاء..."
-        ),
-        style=discord.TextStyle.paragraph,
-        max_length=1000
-    )
-
-    async def on_submit(
-        self,
-        interaction
-    ):
-
-        guild_id = interaction.guild.id
+    async def setup_hook(self):
 
         try:
 
-            db.create_character(
-                guild_id,
-                self.name.value,
-                self.personality.value,
-                "google",
-                "gemini-2.5-flash"
-            )
+            synced = await self.tree.sync()
 
-            await interaction.response.send_message(
-                f"✅ تم إنشاء الشخصية!\n\n"
-                f"🎭 الاسم: **{self.name.value}**\n"
-                f"🧠 المزود: **Gemini**",
-                ephemeral=True
+            print(
+                f"✅ تم مزامنة {len(synced)} أمر Slash."
             )
 
         except Exception as e:
 
-            await interaction.response.send_message(
-                f"❌ تعذر إنشاء الشخصية:\n"
-                f"`{e}`",
-                ephemeral=True
+            print(
+                f"❌ فشل مزامنة الأوامر: {e}"
             )
 
 
-# ============================================================
-# COMMAND: /ai setup
-# ============================================================
+bot = MyAIBot()
 
-@bot.tree.command(
-    name="ai_setup",
-    description="فتح لوحة إعداد MyAI"
-)
-@app_commands.checks.has_permissions(
-    manage_guild=True
-)
-async def ai_setup(
-    interaction: discord.Interaction
-):
 
-    embed = setup_embed(
-        interaction.guild
-    )
-
-    await interaction.response.send_message(
-        embed=embed,
-        view=AISetupView(
-            interaction.guild
-        )
-    )
-
-
-# ============================================================
-# COMMAND: /character create
-# ============================================================
-
-@bot.tree.command(
-    name="character_create",
-    description="إنشاء شخصية AI جديدة"
-)
-async def character_create(
-    interaction: discord.Interaction
-):
-
-    await interaction.response.send_modal(
-        CharacterModal()
-    )
-
-
-# ============================================================
-# COMMAND: /ai
-# ============================================================
-
-@bot.tree.command(
-    name="ai",
-    description="التحدث مع MyAI"
-)
-@app_commands.describe(
-    message="رسالتك إلى الذكاء الاصطناعي"
-)
-async def ai_command(
-    interaction: discord.Interaction,
-    message: str
-):
-
-    await interaction.response.defer()
-
-    config = get_config(
-        interaction.guild.id
-    )
-
-    if not config["character"]:
-
-        await interaction.followup.send(
-            "❌ لم يتم اختيار شخصية AI لهذا السيرفر.\n"
-            "استخدم `/ai_setup` أولًا."
-        )
-
-        return
-
-    try:
-
-        response = await ai.generate(
-
-            guild_id=
-                interaction.guild.id,
-
-            channel_id=
-                interaction.channel.id,
-
-            user_id=
-                interaction.user.id,
-
-            character_name=
-                config["character"],
-
-            user_message=
-                message,
-
-            provider=
-                "google",
-
-            model=
-                "gemini-2.5-flash",
-
-            mode=
-                config["mode"]
-        )
-
-        await interaction.followup.send(
-            response
-        )
-
-    except Exception as e:
-
-        await interaction.followup.send(
-            f"❌ حصل خطأ أثناء تشغيل الذكاء الاصطناعي.\n"
-            f"```{e}```"
-        )
-
-
-# ============================================================
-# MESSAGE LISTENER
-# ============================================================
-
-@bot.event
-async def on_message(
-    message
-):
-
-    if message.author.bot:
-        return
-
-    await bot.process_commands(
-        message
-    )
-
-    if not message.guild:
-        return
-
-    config = get_config(
-        message.guild.id
-    )
-
-    if not config["enabled"]:
-        return
-
-    if not config["character"]:
-        return
-
-    channel_id = config[
-        "channel_id"
-    ]
-
-    reply_type = config[
-        "reply_type"
-    ]
-
-    # ------------------------------------------
-    # CHANNEL MODE
-    # ------------------------------------------
-
-    if reply_type == "channel":
-
-        if channel_id != message.channel.id:
-            return
-
-    # ------------------------------------------
-    # MENTION MODE
-    # ------------------------------------------
-
-    elif reply_type == "mention":
-
-        if bot.user not in message.mentions:
-            return
-
-        message.content = (
-            message.content
-            .replace(
-                f"<@{bot.user.id}>",
-                ""
-            )
-            .replace(
-                f"<@!{bot.user.id}>",
-                ""
-            )
-            .strip()
-        )
-
-    # ------------------------------------------
-    # COMMAND MODE
-    # ------------------------------------------
-
-    elif reply_type == "command":
-
-        return
-
-    if not message.content:
-        return
-
-    try:
-
-        async with message.channel.typing():
-
-            response = await ai.generate(
-
-                guild_id=
-                    message.guild.id,
-
-                channel_id=
-                    message.channel.id,
-
-                user_id=
-                    message.author.id,
-
-                character_name=
-                    config["character"],
-
-                user_message=
-                    message.content,
-
-                provider=
-                    "google",
-
-                model=
-                    "gemini-2.5-flash",
-
-                mode=
-                    config["mode"]
-            )
-
-            # رسالة عادية بدون Embed
-            await message.channel.send(
-                response
-            )
-
-    except Exception as e:
-
-        print(
-            "AI ERROR:",
-            e
-        )
-
-
-# ============================================================
+# ==========================================================
 # READY
-# ============================================================
+# ==========================================================
 
 @bot.event
 async def on_ready():
 
-    try:
-
-        synced = await bot.tree.sync()
-
-        print(
-            f"✅ تم مزامنة "
-            f"{len(synced)} أمر Slash."
-        )
-
-    except Exception as e:
-
-        print(
-            "SYNC ERROR:",
-            e
-        )
-
-    print(
-        "=" * 60
-    )
+    print("=" * 60)
 
     print(
         "🤖 MyAI اشتغل بنجاح!"
@@ -995,18 +98,1075 @@ async def on_ready():
         f"🌐 السيرفرات: {len(bot.guilds)}"
     )
 
-    print(
-        "=" * 60
+    print("=" * 60)
+
+
+# ==========================================================
+# HELPERS
+# ==========================================================
+
+def get_config(guild_id):
+
+    return db.get_ai_config(
+        guild_id
     )
 
 
-# ============================================================
-# ERROR HANDLER
-# ============================================================
+def get_character(
+    guild_id,
+    character_name
+):
+
+    if not character_name:
+        return None
+
+    return db.get_character(
+        guild_id,
+        character_name
+    )
+
+
+def split_message(
+    text,
+    limit=1900
+):
+
+    text = str(text)
+
+    if len(text) <= limit:
+        return [text]
+
+    chunks = []
+
+    while text:
+
+        chunks.append(
+            text[:limit]
+        )
+
+        text = text[limit:]
+
+    return chunks
+
+
+async def send_ai_response(
+    message,
+    response
+):
+
+    chunks = split_message(
+        response
+    )
+
+    for chunk in chunks:
+
+        await message.channel.send(
+            chunk,
+            allowed_mentions=discord.AllowedMentions.none()
+        )
+
+
+# ==========================================================
+# AI COMMAND
+# ==========================================================
+
+@bot.tree.command(
+    name="ai",
+    description="تحدث مع MyAI"
+)
+@app_commands.describe(
+    message="رسالتك إلى الذكاء الاصطناعي"
+)
+async def ai_command(
+    interaction: discord.Interaction,
+    message: str
+):
+
+    if not interaction.guild:
+
+        await interaction.response.send_message(
+            "❌ هذا الأمر يعمل داخل السيرفر فقط.",
+            ephemeral=True
+        )
+
+        return
+
+    guild_id = interaction.guild.id
+    channel_id = interaction.channel.id
+
+    config = get_config(
+        guild_id
+    )
+
+    character_name = (
+        config.get("character_name")
+        or "MyAI"
+    )
+
+    character = get_character(
+        guild_id,
+        character_name
+    )
+
+    if not character:
+
+        characters = db.get_characters(
+            guild_id
+        )
+
+        if not characters:
+
+            await interaction.response.send_message(
+                "❌ لا توجد شخصية AI في هذا السيرفر.\n"
+                "استخدم `/character_create` لإنشاء شخصية.",
+                ephemeral=True
+            )
+
+            return
+
+        character = characters[0]
+        character_name = character["name"]
+
+        db.set_active_character(
+            guild_id,
+            character_name
+        )
+
+    await interaction.response.defer(
+        thinking=True
+    )
+
+    try:
+
+        response = await ai.generate(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=interaction.user.id,
+            character_name=character_name,
+            user_message=message,
+            provider=config.get(
+                "provider",
+                "google"
+            ),
+            model=config.get(
+                "model",
+                "gemini-3.6-flash"
+            ),
+            mode=config.get(
+                "mode",
+                "normal"
+            )
+        )
+
+        chunks = split_message(
+            response,
+            1900
+        )
+
+        await interaction.followup.send(
+            chunks[0],
+            allowed_mentions=discord.AllowedMentions.none()
+        )
+
+        for chunk in chunks[1:]:
+
+            await interaction.followup.send(
+                chunk,
+                allowed_mentions=discord.AllowedMentions.none()
+            )
+
+    except Exception as e:
+
+        print(
+            f"❌ AI ERROR: {repr(e)}"
+        )
+
+        await interaction.followup.send(
+            "❌ حصل خطأ أثناء تشغيل الذكاء الاصطناعي.\n"
+            f"```{str(e)[:1500]}```",
+            ephemeral=True
+        )
+
+
+# ==========================================================
+# AI SETUP
+# ==========================================================
+
+@bot.tree.command(
+    name="ai_setup",
+    description="إعداد MyAI في السيرفر"
+)
+@app_commands.checks.has_permissions(
+    manage_guild=True
+)
+async def ai_setup(
+    interaction: discord.Interaction
+):
+
+    if not interaction.guild:
+
+        await interaction.response.send_message(
+            "❌ هذا الأمر يعمل داخل السيرفر فقط.",
+            ephemeral=True
+        )
+
+        return
+
+    guild_id = interaction.guild.id
+
+    config = get_config(
+        guild_id
+    )
+
+    character_name = (
+        config.get("character_name")
+        or "غير محددة"
+    )
+
+    mode = config.get(
+        "mode",
+        "normal"
+    )
+
+    reply_type = config.get(
+        "reply_type",
+        "mention"
+    )
+
+    channel_id = config.get(
+        "channel_id"
+    )
+
+    enabled = bool(
+        config.get(
+            "enabled",
+            0
+        )
+    )
+
+    channel_text = (
+        f"<#{channel_id}>"
+        if channel_id
+        else "غير محددة"
+    )
+
+    mode_info = ai.get_mode(
+        mode
+    )
+
+    reply_info = ai.get_reply_type(
+        reply_type
+    )
+
+    embed = discord.Embed(
+        title="🤖 MyAI BOT — لوحة التحكم",
+        description=(
+            "أهلًا بك في إعدادات MyAI.\n\n"
+            "اختر الإعداد الذي تريده من الأزرار بالأسفل."
+        ),
+        color=discord.Color.blurple()
+    )
+
+    embed.add_field(
+        name="الحالة",
+        value=(
+            "🟢 مفعّل"
+            if enabled
+            else "🔴 متوقف"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="الشخصية",
+        value=f"🧠 {character_name}",
+        inline=True
+    )
+
+    embed.add_field(
+        name="النمط",
+        value=mode_info["name"],
+        inline=True
+    )
+
+    embed.add_field(
+        name="نوع الرد",
+        value=reply_info["name"],
+        inline=True
+    )
+
+    embed.add_field(
+        name="القناة",
+        value=channel_text,
+        inline=True
+    )
+
+    embed.add_field(
+        name="الموديل",
+        value="Gemini 3.6 Flash",
+        inline=True
+    )
+
+    embed.set_footer(
+        text="MyAI • AI Discord Assistant"
+    )
+
+    view = SetupView(
+        guild_id
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=view,
+        ephemeral=True
+    )
+
+
+# ==========================================================
+# CHARACTER CREATE
+# ==========================================================
+
+@bot.tree.command(
+    name="character_create",
+    description="إنشاء شخصية AI جديدة"
+)
+@app_commands.describe(
+    name="اسم الشخصية",
+    personality="وصف الشخصية وطريقة تصرفها"
+)
+async def character_create(
+    interaction: discord.Interaction,
+    name: str,
+    personality: str
+):
+
+    if not interaction.guild:
+
+        await interaction.response.send_message(
+            "❌ هذا الأمر يعمل داخل السيرفر فقط.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        character = db.create_character(
+            guild_id=interaction.guild.id,
+            name=name,
+            personality=personality,
+            provider="google",
+            model="gemini-3.6-flash",
+            created_by=interaction.user.id
+        )
+
+        await interaction.response.send_message(
+            "✅ تم إنشاء الشخصية بنجاح!\n\n"
+            f"🧠 **الاسم:** {character['name']}\n"
+            f"📝 **الشخصية:** {character['personality']}\n"
+            "🤖 **الموديل:** Gemini 3.6 Flash",
+            ephemeral=True
+        )
+
+    except Exception as e:
+
+        await interaction.response.send_message(
+            f"❌ {e}",
+            ephemeral=True
+        )
+
+
+# ==========================================================
+# CHARACTER LIST
+# ==========================================================
+
+@bot.tree.command(
+    name="character_list",
+    description="عرض شخصيات AI في السيرفر"
+)
+async def character_list(
+    interaction: discord.Interaction
+):
+
+    if not interaction.guild:
+
+        await interaction.response.send_message(
+            "❌ هذا الأمر يعمل داخل السيرفر فقط.",
+            ephemeral=True
+        )
+
+        return
+
+    characters = db.get_characters(
+        interaction.guild.id
+    )
+
+    if not characters:
+
+        await interaction.response.send_message(
+            "📭 لا توجد شخصيات حاليًا.",
+            ephemeral=True
+        )
+
+        return
+
+    lines = []
+
+    config = get_config(
+        interaction.guild.id
+    )
+
+    active = config.get(
+        "character_name"
+    )
+
+    for character in characters:
+
+        marker = (
+            " 🟢"
+            if character["name"] == active
+            else ""
+        )
+
+        lines.append(
+            f"🧠 **{character['name']}**{marker}\n"
+            f"└ {character['personality'][:150]}"
+        )
+
+    embed = discord.Embed(
+        title="🧠 شخصيات MyAI",
+        description="\n\n".join(lines),
+        color=discord.Color.blurple()
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        ephemeral=True
+    )
+
+
+# ==========================================================
+# CHARACTER USE
+# ==========================================================
+
+@bot.tree.command(
+    name="character_use",
+    description="اختيار شخصية AI الحالية"
+)
+@app_commands.describe(
+    name="اسم الشخصية"
+)
+async def character_use(
+    interaction: discord.Interaction,
+    name: str
+):
+
+    if not interaction.guild:
+
+        await interaction.response.send_message(
+            "❌ هذا الأمر يعمل داخل السيرفر فقط.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        db.set_active_character(
+            interaction.guild.id,
+            name
+        )
+
+        await interaction.response.send_message(
+            f"✅ تم اختيار الشخصية **{name}**.",
+            ephemeral=True
+        )
+
+    except Exception as e:
+
+        await interaction.response.send_message(
+            f"❌ {e}",
+            ephemeral=True
+        )
+
+
+# ==========================================================
+# AI STATUS
+# ==========================================================
+
+@bot.tree.command(
+    name="ai_status",
+    description="عرض حالة MyAI"
+)
+async def ai_status(
+    interaction: discord.Interaction
+):
+
+    if not interaction.guild:
+
+        await interaction.response.send_message(
+            "❌ هذا الأمر يعمل داخل السيرفر فقط.",
+            ephemeral=True
+        )
+
+        return
+
+    guild_id = interaction.guild.id
+
+    config = get_config(
+        guild_id
+    )
+
+    stats = db.get_stats(
+        guild_id
+    )
+
+    channel_id = config.get(
+        "channel_id"
+    )
+
+    channel_text = (
+        f"<#{channel_id}>"
+        if channel_id
+        else "غير محددة"
+    )
+
+    embed = discord.Embed(
+        title="📊 حالة MyAI",
+        color=discord.Color.green()
+    )
+
+    embed.add_field(
+        name="الحالة",
+        value=(
+            "🟢 يعمل"
+            if config.get("enabled")
+            else "🔴 متوقف"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="الموديل",
+        value="Gemini 3.6 Flash",
+        inline=True
+    )
+
+    embed.add_field(
+        name="القناة",
+        value=channel_text,
+        inline=True
+    )
+
+    embed.add_field(
+        name="الشخصية",
+        value=(
+            config.get(
+                "character_name"
+            )
+            or "غير محددة"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="الرسائل",
+        value=str(
+            stats["messages"]
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="الشخصيات",
+        value=str(
+            stats["characters"]
+        ),
+        inline=True
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        ephemeral=True
+    )
+
+
+# ==========================================================
+# MEMORY CLEAR
+# ==========================================================
+
+@bot.tree.command(
+    name="ai_memory_clear",
+    description="مسح ذاكرة محادثة MyAI"
+)
+@app_commands.checks.has_permissions(
+    manage_guild=True
+)
+async def ai_memory_clear(
+    interaction: discord.Interaction
+):
+
+    if not interaction.guild:
+
+        await interaction.response.send_message(
+            "❌ هذا الأمر يعمل داخل السيرفر فقط.",
+            ephemeral=True
+        )
+
+        return
+
+    db.clear_history(
+        interaction.guild.id,
+        channel_id=interaction.channel.id
+    )
+
+    await interaction.response.send_message(
+        "🧹 تم مسح ذاكرة MyAI في هذه القناة.",
+        ephemeral=True
+    )
+
+
+# ==========================================================
+# SETUP VIEW
+# ==========================================================
+
+class SetupView(
+    discord.ui.View
+):
+
+    def __init__(
+        self,
+        guild_id
+    ):
+
+        super().__init__(
+            timeout=300
+        )
+
+        self.guild_id = guild_id
+
+    # ------------------------------------------------------
+    # ENABLE
+    # ------------------------------------------------------
+
+    @discord.ui.button(
+        label="تشغيل AI",
+        emoji="🟢",
+        style=discord.ButtonStyle.success,
+        row=0
+    )
+    async def enable(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        if not interaction.user.guild_permissions.manage_guild:
+
+            await interaction.response.send_message(
+                "❌ تحتاج صلاحية إدارة السيرفر.",
+                ephemeral=True
+            )
+
+            return
+
+        db.set_ai_enabled(
+            self.guild_id,
+            True
+        )
+
+        await interaction.response.send_message(
+            "🟢 تم تشغيل MyAI.",
+            ephemeral=True
+        )
+
+    # ------------------------------------------------------
+    # DISABLE
+    # ------------------------------------------------------
+
+    @discord.ui.button(
+        label="إيقاف AI",
+        emoji="🔴",
+        style=discord.ButtonStyle.danger,
+        row=0
+    )
+    async def disable(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        if not interaction.user.guild_permissions.manage_guild:
+
+            await interaction.response.send_message(
+                "❌ تحتاج صلاحية إدارة السيرفر.",
+                ephemeral=True
+            )
+
+            return
+
+        db.set_ai_enabled(
+            self.guild_id,
+            False
+        )
+
+        await interaction.response.send_message(
+            "🔴 تم إيقاف MyAI.",
+            ephemeral=True
+        )
+
+    # ------------------------------------------------------
+    # MODE
+    # ------------------------------------------------------
+
+    @discord.ui.select(
+        placeholder="🎛️ اختر نمط AI",
+        row=1,
+        options=[
+            discord.SelectOption(
+                label="عادي",
+                value="normal",
+                emoji="🤖"
+            ),
+            discord.SelectOption(
+                label="اجتماعي",
+                value="friendly",
+                emoji="😎"
+            ),
+            discord.SelectOption(
+                label="نشيط",
+                value="active",
+                emoji="🔥"
+            ),
+            discord.SelectOption(
+                label="كوميدي",
+                value="fun",
+                emoji="😂"
+            ),
+            discord.SelectOption(
+                label="احترافي",
+                value="professional",
+                emoji="🧠"
+            )
+        ]
+    )
+    async def mode_select(
+        self,
+        interaction: discord.Interaction,
+        select: discord.ui.Select
+    ):
+
+        if not interaction.user.guild_permissions.manage_guild:
+
+            await interaction.response.send_message(
+                "❌ تحتاج صلاحية إدارة السيرفر.",
+                ephemeral=True
+            )
+
+            return
+
+        mode = select.values[0]
+
+        db.set_ai_mode(
+            self.guild_id,
+            mode
+        )
+
+        await interaction.response.send_message(
+            f"✅ تم تغيير النمط إلى "
+            f"**{ai.get_mode(mode)['name']}**.",
+            ephemeral=True
+        )
+
+    # ------------------------------------------------------
+    # REPLY TYPE
+    # ------------------------------------------------------
+
+    @discord.ui.select(
+        placeholder="💬 اختر طريقة الرد",
+        row=2,
+        options=[
+            discord.SelectOption(
+                label="عند المنشن",
+                value="mention",
+                emoji="📌"
+            ),
+            discord.SelectOption(
+                label="داخل القناة",
+                value="channel",
+                emoji="💬"
+            ),
+            discord.SelectOption(
+                label="بالأمر فقط",
+                value="command",
+                emoji="⌨️"
+            )
+        ]
+    )
+    async def reply_select(
+        self,
+        interaction: discord.Interaction,
+        select: discord.ui.Select
+    ):
+
+        if not interaction.user.guild_permissions.manage_guild:
+
+            await interaction.response.send_message(
+                "❌ تحتاج صلاحية إدارة السيرفر.",
+                ephemeral=True
+            )
+
+            return
+
+        reply_type = select.values[0]
+
+        db.set_reply_type(
+            self.guild_id,
+            reply_type
+        )
+
+        await interaction.response.send_message(
+            f"✅ تم تغيير طريقة الرد إلى "
+            f"**{ai.get_reply_type(reply_type)['name']}**.",
+            ephemeral=True
+        )
+
+    # ------------------------------------------------------
+    # CHANNEL SELECT
+    # ------------------------------------------------------
+
+    @discord.ui.channel_select(
+        placeholder="📺 اختر قناة AI",
+        channel_types=[
+            discord.ChannelType.text
+        ],
+        row=3
+    )
+    async def channel_select(
+        self,
+        interaction: discord.Interaction,
+        select: discord.ui.ChannelSelect
+    ):
+
+        if not interaction.user.guild_permissions.manage_guild:
+
+            await interaction.response.send_message(
+                "❌ تحتاج صلاحية إدارة السيرفر.",
+                ephemeral=True
+            )
+
+            return
+
+        channel = select.values[0]
+
+        db.set_ai_channel(
+            self.guild_id,
+            channel.id
+        )
+
+        await interaction.response.send_message(
+            f"✅ تم اختيار {channel.mention} كقناة AI.",
+            ephemeral=True
+        )
+
+
+# ==========================================================
+# MESSAGE LISTENER
+# ==========================================================
+
+@bot.event
+async def on_message(
+    message: discord.Message
+):
+
+    # تجاهل البوتات
+    if message.author.bot:
+        return
+
+    # تجاهل الخاص
+    if not message.guild:
+        return
+
+    guild_id = message.guild.id
+
+    config = get_config(
+        guild_id
+    )
+
+    # AI غير مفعّل
+    if not config.get("enabled"):
+        await bot.process_commands(message)
+        return
+
+    reply_type = config.get(
+        "reply_type",
+        "mention"
+    )
+
+    # بالأمر فقط
+    if reply_type == "command":
+
+        await bot.process_commands(
+            message
+        )
+
+        return
+
+    # ------------------------------------------------------
+    # CHARACTER
+    # ------------------------------------------------------
+
+    character_name = (
+        config.get(
+            "character_name"
+        )
+        or "MyAI"
+    )
+
+    character = db.get_character(
+        guild_id,
+        character_name
+    )
+
+    if not character:
+
+        await bot.process_commands(
+            message
+        )
+
+        return
+
+    # ------------------------------------------------------
+    # CHANNEL MODE
+    # ------------------------------------------------------
+
+    if reply_type == "channel":
+
+        configured_channel = config.get(
+            "channel_id"
+        )
+
+        if not configured_channel:
+            await bot.process_commands(
+                message
+            )
+            return
+
+        if message.channel.id != configured_channel:
+
+            await bot.process_commands(
+                message
+            )
+
+            return
+
+        user_text = message.content.strip()
+
+    # ------------------------------------------------------
+    # MENTION MODE
+    # ------------------------------------------------------
+
+    elif reply_type == "mention":
+
+        if bot.user not in message.mentions:
+
+            await bot.process_commands(
+                message
+            )
+
+            return
+
+        user_text = message.content
+
+        user_text = user_text.replace(
+            f"<@{bot.user.id}>",
+            ""
+        )
+
+        user_text = user_text.replace(
+            f"<@!{bot.user.id}>",
+            ""
+        )
+
+        user_text = user_text.strip()
+
+        if not user_text:
+
+            await message.reply(
+                "👋 هلا! وش تبي تسألني؟",
+                mention_author=False
+            )
+
+            await bot.process_commands(
+                message
+            )
+
+            return
+
+    else:
+
+        await bot.process_commands(
+            message
+        )
+
+        return
+
+    # ------------------------------------------------------
+    # TYPING
+    # ------------------------------------------------------
+
+    try:
+
+        async with message.channel.typing():
+
+            response = await ai.generate(
+                guild_id=guild_id,
+                channel_id=message.channel.id,
+                user_id=message.author.id,
+                character_name=character_name,
+                user_message=user_text,
+                provider=config.get(
+                    "provider",
+                    "google"
+                ),
+                model=config.get(
+                    "model",
+                    "gemini-3.6-flash"
+                ),
+                mode=config.get(
+                    "mode",
+                    "normal"
+                )
+            )
+
+        await send_ai_response(
+            message,
+            response
+        )
+
+    except Exception as e:
+
+        print(
+            f"❌ AUTO AI ERROR: {repr(e)}"
+        )
+
+        await message.reply(
+            "❌ حصل خطأ أثناء تشغيل الذكاء الاصطناعي.",
+            mention_author=False
+        )
+
+    await bot.process_commands(
+        message
+    )
+
+
+# ==========================================================
+# COMMAND ERROR HANDLER
+# ==========================================================
 
 @bot.tree.error
 async def on_app_command_error(
-    interaction,
+    interaction: discord.Interaction,
     error
 ):
 
@@ -1015,40 +1175,49 @@ async def on_app_command_error(
         app_commands.errors.MissingPermissions
     ):
 
-        if interaction.response.is_done():
+        message = (
+            "❌ ما عندك الصلاحية المطلوبة "
+            "لاستخدام هذا الأمر."
+        )
 
-            await interaction.followup.send(
-                "❌ تحتاج صلاحية **إدارة السيرفر**.",
-                ephemeral=True
-            )
+    else:
 
-        else:
+        print(
+            f"❌ COMMAND ERROR: {repr(error)}"
+        )
 
-            await interaction.response.send_message(
-                "❌ تحتاج صلاحية **إدارة السيرفر**.",
-                ephemeral=True
-            )
+        message = (
+            "❌ حدث خطأ أثناء تنفيذ الأمر."
+        )
 
-        return
+    if interaction.response.is_done():
 
-    print(
-        "COMMAND ERROR:",
-        error
-    )
+        await interaction.followup.send(
+            message,
+            ephemeral=True
+        )
+
+    else:
+
+        await interaction.response.send_message(
+            message,
+            ephemeral=True
+        )
 
 
-# ============================================================
+# ==========================================================
 # START
-# ============================================================
+# ==========================================================
 
-TOKEN = os.getenv(
-    "DISCORD_TOKEN"
-)
+try:
 
-if not TOKEN:
-
-    raise RuntimeError(
-        "DISCORD_TOKEN غير موجود في Environment Variables."
+    bot.run(
+        TOKEN
     )
 
-bot.run(TOKEN)
+finally:
+
+    try:
+        db.close()
+    except Exception:
+        pass
