@@ -1,18 +1,38 @@
 import os
 import json
-import asyncio
 from typing import Optional, Dict, Any
 
 import aiohttp
 
 
-DEFAULT_PROVIDER = os.getenv("PRIMARY_AI_PROVIDER", "openai").lower()
+# =========================================================
+# DEFAULT CONFIG
+# =========================================================
+
+DEFAULT_PROVIDER = os.getenv(
+    "PRIMARY_AI_PROVIDER",
+    "openai",
+).lower()
 
 DEFAULT_MODELS = {
-    "openai": os.getenv("OPENAI_MODEL", "gpt-5.6-luna"),
-    "google": os.getenv("GOOGLE_MODEL", "gemini-3.6-flash"),
-    "anthropic": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+    "openai": os.getenv(
+        "OPENAI_MODEL",
+        "gpt-5.6-luna",
+    ),
+    "google": os.getenv(
+        "GOOGLE_MODEL",
+        "gemini-3.6-flash",
+    ),
+    "anthropic": os.getenv(
+        "ANTHROPIC_MODEL",
+        "claude-sonnet-4-6",
+    ),
 }
+
+
+# =========================================================
+# AI MODES
+# =========================================================
 
 MODES = {
     "normal": {
@@ -20,27 +40,36 @@ MODES = {
         "max_tokens": 1200,
         "auto_reply": False,
     },
+
     "friendly": {
         "temperature": 0.85,
         "max_tokens": 1200,
         "auto_reply": False,
     },
+
     "active": {
         "temperature": 0.8,
         "max_tokens": 1400,
         "auto_reply": True,
     },
+
     "fun": {
         "temperature": 0.95,
         "max_tokens": 1400,
         "auto_reply": True,
     },
+
     "professional": {
         "temperature": 0.45,
         "max_tokens": 1200,
         "auto_reply": False,
     },
 }
+
+
+# =========================================================
+# REPLY TYPES
+# =========================================================
 
 REPLY_TYPES = {
     "mention",
@@ -51,13 +80,24 @@ REPLY_TYPES = {
 }
 
 
+# =========================================================
+# AI ENGINE
+# =========================================================
+
 class AIEngine:
+
     def __init__(self, db):
+
         self.db = db
 
+        # API keys
         self.google_api_key = None
         self.openai_api_key = None
         self.anthropic_api_key = None
+
+        # -------------------------------------------------
+        # API endpoints
+        # -------------------------------------------------
 
         self.google_endpoint = os.getenv(
             "GOOGLE_API_ENDPOINT",
@@ -74,9 +114,21 @@ class AIEngine:
             "https://api.anthropic.com/v1/messages",
         )
 
+        # -------------------------------------------------
+        # Fallback
+        # -------------------------------------------------
+
         self.fallback_enabled = (
-            os.getenv("AI_ENABLE_FALLBACK", "false").lower()
-            in {"1", "true", "yes", "on"}
+            os.getenv(
+                "AI_ENABLE_FALLBACK",
+                "false",
+            ).lower()
+            in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
         )
 
         self.fallback_provider = os.getenv(
@@ -86,26 +138,34 @@ class AIEngine:
 
         self.reload_keys()
 
-    # ---------------------------------------------------------
+    # =====================================================
     # API KEYS
-    # ---------------------------------------------------------
+    # =====================================================
 
     def reload_keys(self):
+
         self.google_api_key = (
             os.getenv("GOOGLE_API_KEY")
             or os.getenv("GEMINI_API_KEY")
         )
 
-        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        self.openai_api_key = os.getenv(
+            "OPENAI_API_KEY"
+        )
 
-        self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+        self.anthropic_api_key = os.getenv(
+            "ANTHROPIC_API_KEY"
+        )
 
-    # ---------------------------------------------------------
+    # =====================================================
     # HELPERS
-    # ---------------------------------------------------------
+    # =====================================================
 
     @staticmethod
-    def row_to_dict(row) -> Optional[Dict[str, Any]]:
+    def row_to_dict(
+        row,
+    ) -> Optional[Dict[str, Any]]:
+
         if row is None:
             return None
 
@@ -114,28 +174,47 @@ class AIEngine:
 
         try:
             return dict(row)
+
         except Exception:
             return None
 
-    def get_mode(self, mode: Optional[str]) -> Dict[str, Any]:
-        mode = (mode or "normal").lower()
+    # -----------------------------------------------------
+
+    def get_mode(
+        self,
+        mode: Optional[str],
+    ) -> Dict[str, Any]:
+
+        mode = (
+            mode
+            or "normal"
+        ).lower()
 
         if mode not in MODES:
             mode = "normal"
 
         return MODES[mode]
 
-    def get_reply_type(self, reply_type: Optional[str]) -> str:
-        reply_type = (reply_type or "mention").lower()
+    # -----------------------------------------------------
+
+    def get_reply_type(
+        self,
+        reply_type: Optional[str],
+    ) -> str:
+
+        reply_type = (
+            reply_type
+            or "mention"
+        ).lower()
 
         if reply_type not in REPLY_TYPES:
             return "mention"
 
         return reply_type
 
-    # ---------------------------------------------------------
+    # =====================================================
     # SYSTEM PROMPT
-    # ---------------------------------------------------------
+    # =====================================================
 
     def build_system_prompt(
         self,
@@ -195,9 +274,9 @@ class AIEngine:
 
         return "\n".join(prompt_parts)
 
-    # ---------------------------------------------------------
+    # =====================================================
     # GOOGLE GEMINI
-    # ---------------------------------------------------------
+    # =====================================================
 
     async def _google(
         self,
@@ -222,12 +301,24 @@ class AIEngine:
         contents = []
 
         for message in messages:
-            role = message.get("role", "user")
-            content = message.get("content", "")
+
+            role = message.get(
+                "role",
+                "user",
+            )
+
+            content = message.get(
+                "content",
+                "",
+            )
 
             if role == "assistant":
                 role = "model"
-            elif role not in {"user", "model"}:
+
+            elif role not in {
+                "user",
+                "model",
+            }:
                 role = "user"
 
             contents.append(
@@ -235,7 +326,7 @@ class AIEngine:
                     "role": role,
                     "parts": [
                         {
-                            "text": str(content)
+                            "text": str(content),
                         }
                     ],
                 }
@@ -245,9 +336,9 @@ class AIEngine:
             "systemInstruction": {
                 "parts": [
                     {
-                        "text": system_prompt
+                        "text": system_prompt,
                     }
-                ]
+                ],
             },
             "contents": contents,
             "generationConfig": {
@@ -256,9 +347,14 @@ class AIEngine:
             },
         }
 
-        timeout = aiohttp.ClientTimeout(total=90)
+        timeout = aiohttp.ClientTimeout(
+            total=90
+        )
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(
+            timeout=timeout
+        ) as session:
+
             async with session.post(
                 url,
                 json=payload,
@@ -267,20 +363,30 @@ class AIEngine:
                 text = await response.text()
 
                 if response.status >= 400:
+
                     raise RuntimeError(
-                        f"Google API HTTP {response.status}: {text[:1500]}"
+                        f"Google API HTTP "
+                        f"{response.status}: "
+                        f"{text[:1500]}"
                     )
 
                 try:
                     data = json.loads(text)
+
                 except json.JSONDecodeError:
+
                     raise RuntimeError(
-                        f"Google returned invalid JSON: {text[:1000]}"
+                        "Google returned invalid JSON: "
+                        f"{text[:1000]}"
                     )
 
-        candidates = data.get("candidates") or []
+        candidates = (
+            data.get("candidates")
+            or []
+        )
 
         if not candidates:
+
             raise RuntimeError(
                 f"Google returned no candidates: {data}"
             )
@@ -292,21 +398,27 @@ class AIEngine:
         )
 
         result = "".join(
-            str(part.get("text", ""))
+            str(
+                part.get(
+                    "text",
+                    "",
+                )
+            )
             for part in parts
             if isinstance(part, dict)
         ).strip()
 
         if not result:
+
             raise RuntimeError(
                 "Google returned an empty response."
             )
 
         return result
 
-    # ---------------------------------------------------------
+    # =====================================================
     # OPENAI RESPONSES API
-    # ---------------------------------------------------------
+    # =====================================================
 
     async def _openai(
         self,
@@ -318,22 +430,38 @@ class AIEngine:
     ) -> str:
 
         if not self.openai_api_key:
+
             raise RuntimeError(
                 "OPENAI_API_KEY is not configured."
             )
 
         headers = {
-            "Authorization": f"Bearer {self.openai_api_key}",
+            "Authorization": (
+                f"Bearer {self.openai_api_key}"
+            ),
             "Content-Type": "application/json",
         }
 
         input_messages = []
 
         for message in messages:
-            role = message.get("role", "user")
-            content = str(message.get("content", ""))
 
-            if role not in {"user", "assistant"}:
+            role = message.get(
+                "role",
+                "user",
+            )
+
+            content = str(
+                message.get(
+                    "content",
+                    "",
+                )
+            )
+
+            if role not in {
+                "user",
+                "assistant",
+            }:
                 role = "user"
 
             input_messages.append(
@@ -351,9 +479,14 @@ class AIEngine:
             "max_output_tokens": max_tokens,
         }
 
-        timeout = aiohttp.ClientTimeout(total=90)
+        timeout = aiohttp.ClientTimeout(
+            total=90
+        )
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(
+            timeout=timeout
+        ) as session:
+
             async with session.post(
                 self.openai_endpoint,
                 headers=headers,
@@ -363,54 +496,102 @@ class AIEngine:
                 text = await response.text()
 
                 if response.status >= 400:
+
                     raise RuntimeError(
-                        f"OpenAI API HTTP {response.status}: {text[:2000]}"
+                        f"OpenAI API HTTP "
+                        f"{response.status}: "
+                        f"{text[:2000]}"
                     )
 
                 try:
                     data = json.loads(text)
+
                 except json.JSONDecodeError:
+
                     raise RuntimeError(
-                        f"OpenAI returned invalid JSON: {text[:1000]}"
+                        "OpenAI returned invalid JSON: "
+                        f"{text[:1000]}"
                     )
 
-        # Preferred Responses API field.
-        output_text = data.get("output_text")
+        # -------------------------------------------------
+        # Preferred Responses API output
+        # -------------------------------------------------
 
-        if isinstance(output_text, str) and output_text.strip():
+        output_text = data.get(
+            "output_text"
+        )
+
+        if (
+            isinstance(output_text, str)
+            and output_text.strip()
+        ):
             return output_text.strip()
 
-        # Fallback parser for output blocks.
-        output = data.get("output", [])
+        # -------------------------------------------------
+        # Fallback parser
+        # -------------------------------------------------
+
+        output = data.get(
+            "output",
+            [],
+        )
 
         collected = []
 
         if isinstance(output, list):
+
             for item in output:
-                if not isinstance(item, dict):
+
+                if not isinstance(
+                    item,
+                    dict,
+                ):
                     continue
 
-                content = item.get("content", [])
+                content = item.get(
+                    "content",
+                    [],
+                )
 
-                if not isinstance(content, list):
+                if not isinstance(
+                    content,
+                    list,
+                ):
                     continue
 
                 for block in content:
-                    if not isinstance(block, dict):
+
+                    if not isinstance(
+                        block,
+                        dict,
+                    ):
                         continue
 
-                    block_type = block.get("type")
+                    block_type = block.get(
+                        "type"
+                    )
 
                     if block_type in {
                         "output_text",
                         "text",
                     }:
-                        value = block.get("text", "")
 
-                        if isinstance(value, str):
-                            collected.append(value)
+                        value = block.get(
+                            "text",
+                            "",
+                        )
 
-        result = "".join(collected).strip()
+                        if isinstance(
+                            value,
+                            str,
+                        ):
+                            collected.append(
+                                value
+                            )
+
+        result = "".join(
+            collected
+        ).strip()
 
         if result:
             return result
@@ -419,9 +600,9 @@ class AIEngine:
             f"OpenAI returned no usable text: {data}"
         )
 
-    # ---------------------------------------------------------
+    # =====================================================
     # ANTHROPIC
-    # ---------------------------------------------------------
+    # =====================================================
 
     async def _anthropic(
         self,
@@ -433,6 +614,7 @@ class AIEngine:
     ) -> str:
 
         if not self.anthropic_api_key:
+
             raise RuntimeError(
                 "ANTHROPIC_API_KEY is not configured."
             )
@@ -446,16 +628,26 @@ class AIEngine:
         anthropic_messages = []
 
         for message in messages:
-            role = message.get("role", "user")
 
-            if role not in {"user", "assistant"}:
+            role = message.get(
+                "role",
+                "user",
+            )
+
+            if role not in {
+                "user",
+                "assistant",
+            }:
                 role = "user"
 
             anthropic_messages.append(
                 {
                     "role": role,
                     "content": str(
-                        message.get("content", "")
+                        message.get(
+                            "content",
+                            "",
+                        )
                     ),
                 }
             )
@@ -468,9 +660,14 @@ class AIEngine:
             "max_tokens": max_tokens,
         }
 
-        timeout = aiohttp.ClientTimeout(total=90)
+        timeout = aiohttp.ClientTimeout(
+            total=90
+        )
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(
+            timeout=timeout
+        ) as session:
+
             async with session.post(
                 self.anthropic_endpoint,
                 headers=headers,
@@ -480,41 +677,67 @@ class AIEngine:
                 text = await response.text()
 
                 if response.status >= 400:
+
                     raise RuntimeError(
-                        f"Anthropic API HTTP {response.status}: {text[:1500]}"
+                        f"Anthropic API HTTP "
+                        f"{response.status}: "
+                        f"{text[:1500]}"
                     )
 
                 try:
                     data = json.loads(text)
+
                 except json.JSONDecodeError:
+
                     raise RuntimeError(
-                        f"Anthropic returned invalid JSON: {text[:1000]}"
+                        "Anthropic returned invalid JSON: "
+                        f"{text[:1000]}"
                     )
 
-        content = data.get("content", [])
+        content = data.get(
+            "content",
+            [],
+        )
 
         result = ""
 
-        if isinstance(content, list):
+        if isinstance(
+            content,
+            list,
+        ):
+
             for block in content:
-                if isinstance(block, dict):
-                    if block.get("type") == "text":
-                        result += str(
-                            block.get("text", "")
+
+                if not isinstance(
+                    block,
+                    dict,
+                ):
+                    continue
+
+                if block.get(
+                    "type"
+                ) == "text":
+
+                    result += str(
+                        block.get(
+                            "text",
+                            "",
                         )
+                    )
 
         result = result.strip()
 
         if not result:
+
             raise RuntimeError(
                 f"Anthropic returned no usable text: {data}"
             )
 
         return result
 
-    # ---------------------------------------------------------
+    # =====================================================
     # PROVIDER REQUEST
-    # ---------------------------------------------------------
+    # =====================================================
 
     async def request(
         self,
@@ -526,9 +749,13 @@ class AIEngine:
         max_tokens: int,
     ) -> str:
 
-        provider = (provider or DEFAULT_PROVIDER).lower()
+        provider = (
+            provider
+            or DEFAULT_PROVIDER
+        ).lower()
 
         if provider == "openai":
+
             return await self._openai(
                 model=model,
                 system_prompt=system_prompt,
@@ -538,6 +765,7 @@ class AIEngine:
             )
 
         if provider == "google":
+
             return await self._google(
                 model=model,
                 system_prompt=system_prompt,
@@ -547,6 +775,7 @@ class AIEngine:
             )
 
         if provider == "anthropic":
+
             return await self._anthropic(
                 model=model,
                 system_prompt=system_prompt,
@@ -559,9 +788,9 @@ class AIEngine:
             f"Unsupported AI provider: {provider}"
         )
 
-    # ---------------------------------------------------------
+    # =====================================================
     # REQUEST WITH FALLBACK
-    # ---------------------------------------------------------
+    # =====================================================
 
     async def request_with_fallback(
         self,
@@ -573,9 +802,13 @@ class AIEngine:
         max_tokens: int,
     ) -> str:
 
-        provider = (provider or DEFAULT_PROVIDER).lower()
+        provider = (
+            provider
+            or DEFAULT_PROVIDER
+        ).lower()
 
         try:
+
             return await self.request(
                 provider=provider,
                 model=model,
@@ -590,19 +823,32 @@ class AIEngine:
             if not self.fallback_enabled:
                 raise
 
-            fallback = self.fallback_provider
+            fallback = (
+                self.fallback_provider
+            )
 
             if fallback == provider:
                 raise
 
-            fallback_model = DEFAULT_MODELS.get(
-                fallback
+            fallback_model = (
+                DEFAULT_MODELS.get(
+                    fallback
+                )
             )
 
             if not fallback_model:
                 raise primary_error
 
             try:
+
+                print(
+                    "[AIEngine] "
+                    f"Primary provider '{provider}' "
+                    f"failed. "
+                    f"Trying fallback "
+                    f"'{fallback}'."
+                )
+
                 return await self.request(
                     provider=fallback,
                     model=fallback_model,
@@ -613,15 +859,16 @@ class AIEngine:
                 )
 
             except Exception as fallback_error:
+
                 raise RuntimeError(
                     "Primary AI provider failed.\n"
                     f"Primary error: {primary_error}\n"
                     f"Fallback error: {fallback_error}"
                 ) from fallback_error
 
-    # ---------------------------------------------------------
+    # =====================================================
     # GENERATE
-    # ---------------------------------------------------------
+    # =====================================================
 
     async def generate(
         self,
@@ -629,32 +876,85 @@ class AIEngine:
         channel_id,
         user_id,
         character_name: Optional[str],
-        prompt: str,
+        prompt: Optional[str] = None,
         mode: str = "normal",
         provider: Optional[str] = None,
         model: Optional[str] = None,
+        user_message: Optional[str] = None,
     ) -> str:
 
         self.reload_keys()
 
-        mode_config = self.get_mode(mode)
+        # -------------------------------------------------
+        # Compatibility:
+        #
+        # main.py uses:
+        # user_message="..."
+        #
+        # Older code may use:
+        # prompt="..."
+        # -------------------------------------------------
+
+        if user_message is not None:
+
+            prompt = user_message
+
+        if prompt is None:
+
+            raise ValueError(
+                "No user message was provided."
+            )
+
+        prompt = str(prompt).strip()
+
+        if not prompt:
+
+            raise ValueError(
+                "User message is empty."
+            )
+
+        # -------------------------------------------------
+        # Mode
+        # -------------------------------------------------
+
+        mode_config = self.get_mode(
+            mode
+        )
+
+        # -------------------------------------------------
+        # Character
+        # -------------------------------------------------
 
         character = self.db.get_character(
             guild_id,
             character_name,
         )
 
-        character_dict = self.row_to_dict(character)
+        character_dict = self.row_to_dict(
+            character
+        )
 
         if not character_dict:
+
             raise RuntimeError(
-                f"Character not found: {character_name}"
+                f"Character not found: "
+                f"{character_name}"
             )
 
-        system_prompt = self.build_system_prompt(
-            character_dict,
-            mode,
+        # -------------------------------------------------
+        # System prompt
+        # -------------------------------------------------
+
+        system_prompt = (
+            self.build_system_prompt(
+                character_dict,
+                mode,
+            )
         )
+
+        # -------------------------------------------------
+        # Provider
+        # -------------------------------------------------
 
         provider = (
             provider
@@ -664,6 +964,10 @@ class AIEngine:
             )
         ).lower()
 
+        # -------------------------------------------------
+        # Model
+        # -------------------------------------------------
+
         model = (
             model
             or DEFAULT_MODELS.get(
@@ -671,6 +975,17 @@ class AIEngine:
                 "",
             )
         )
+
+        if not model:
+
+            raise RuntimeError(
+                f"No model configured for "
+                f"provider: {provider}"
+            )
+
+        # -------------------------------------------------
+        # History
+        # -------------------------------------------------
 
         history_rows = self.db.get_history(
             guild_id,
@@ -682,56 +997,114 @@ class AIEngine:
         messages = []
 
         if history_rows:
+
             for row in history_rows:
-                item = self.row_to_dict(row)
+
+                item = self.row_to_dict(
+                    row
+                )
 
                 if not item:
                     continue
 
-                role = item.get("role")
-                content = item.get("content")
+                role = item.get(
+                    "role"
+                )
+
+                content = item.get(
+                    "content"
+                )
+
+                if not content:
+                    continue
 
                 if role == "user":
+
                     messages.append(
                         {
                             "role": "user",
-                            "content": str(content),
+                            "content": str(
+                                content
+                            ),
                         }
                     )
 
                 elif role == "assistant":
+
                     messages.append(
                         {
                             "role": "assistant",
-                            "content": str(content),
+                            "content": str(
+                                content
+                            ),
                         }
                     )
+
+        # -------------------------------------------------
+        # Current user message
+        # -------------------------------------------------
 
         messages.append(
             {
                 "role": "user",
-                "content": str(prompt),
+                "content": prompt,
             }
         )
 
-        response = await self.request_with_fallback(
-            provider=provider,
-            model=model,
-            system_prompt=system_prompt,
-            messages=messages,
-            temperature=mode_config["temperature"],
-            max_tokens=mode_config["max_tokens"],
+        # -------------------------------------------------
+        # Debug
+        # -------------------------------------------------
+
+        print(
+            "[AIEngine] generate | "
+            f"provider={provider} | "
+            f"model={model} | "
+            f"character={character_name} | "
+            f"mode={mode}"
         )
 
-        # Save user message.
+        # -------------------------------------------------
+        # Generate response
+        # -------------------------------------------------
+
+        response = (
+            await self.request_with_fallback(
+                provider=provider,
+                model=model,
+                system_prompt=system_prompt,
+                messages=messages,
+                temperature=mode_config[
+                    "temperature"
+                ],
+                max_tokens=mode_config[
+                    "max_tokens"
+                ],
+            )
+        )
+
+        response = str(
+            response
+        ).strip()
+
+        if not response:
+
+            raise RuntimeError(
+                "AI returned an empty response."
+            )
+
+        # -------------------------------------------------
+        # Save history
+        # -------------------------------------------------
+
         try:
+
             self.db.add_message(
                 guild_id=guild_id,
                 channel_id=channel_id,
                 user_id=user_id,
                 character_name=character_name,
                 role="user",
-                content=str(prompt),
+                content=prompt,
             )
 
             self.db.add_message(
@@ -744,15 +1117,18 @@ class AIEngine:
             )
 
         except Exception as db_error:
+
             print(
-                f"[AIEngine] Failed to save message history: {db_error}"
+                "[AIEngine] "
+                "Failed to save message history: "
+                f"{db_error}"
             )
 
         return response
 
-    # ---------------------------------------------------------
+    # =====================================================
     # PROACTIVE AI
-    # ---------------------------------------------------------
+    # =====================================================
 
     async def generate_proactive(
         self,
@@ -765,17 +1141,29 @@ class AIEngine:
 
         self.reload_keys()
 
+        # -------------------------------------------------
+        # Character
+        # -------------------------------------------------
+
         character = self.db.get_character(
             guild_id,
             character_name,
         )
 
-        character_dict = self.row_to_dict(character)
+        character_dict = self.row_to_dict(
+            character
+        )
 
         if not character_dict:
+
             raise RuntimeError(
-                f"Character not found: {character_name}"
+                f"Character not found: "
+                f"{character_name}"
             )
+
+        # -------------------------------------------------
+        # History
+        # -------------------------------------------------
 
         history_rows = self.db.get_history(
             guild_id,
@@ -785,38 +1173,73 @@ class AIEngine:
         )
 
         if not history_rows:
+
             return "NO_ALERT"
 
         history_text = []
 
         for row in history_rows:
-            item = self.row_to_dict(row)
+
+            item = self.row_to_dict(
+                row
+            )
 
             if not item:
                 continue
 
-            role = item.get("role", "user")
-            content = item.get("content", "")
+            role = item.get(
+                "role",
+                "user",
+            )
+
+            content = item.get(
+                "content",
+                "",
+            )
+
+            if not content:
+                continue
 
             history_text.append(
                 f"{role}: {content}"
             )
 
+        if not history_text:
+
+            return "NO_ALERT"
+
+        # -------------------------------------------------
+        # Proactive prompt
+        # -------------------------------------------------
+
         prompt = (
-            "Analyze the recent Discord conversation below.\n"
-            "Decide whether the AI should proactively respond.\n\n"
+            "Analyze the recent Discord "
+            "conversation below.\n"
+            "Decide whether the AI should "
+            "proactively respond.\n\n"
             "Return exactly one of these formats:\n"
             "NO_ALERT\n"
             "ALERT: <short natural response>\n\n"
-            "Only respond proactively when there is a useful reason.\n\n"
+            "Only respond proactively when "
+            "there is a useful reason.\n\n"
             "Conversation:\n"
             + "\n".join(history_text)
         )
 
-        system_prompt = self.build_system_prompt(
-            character_dict,
-            "active",
+        # -------------------------------------------------
+        # System prompt
+        # -------------------------------------------------
+
+        system_prompt = (
+            self.build_system_prompt(
+                character_dict,
+                "active",
+            )
         )
+
+        # -------------------------------------------------
+        # Provider
+        # -------------------------------------------------
 
         provider = (
             provider
@@ -826,6 +1249,10 @@ class AIEngine:
             )
         ).lower()
 
+        # -------------------------------------------------
+        # Model
+        # -------------------------------------------------
+
         model = (
             model
             or DEFAULT_MODELS.get(
@@ -834,29 +1261,63 @@ class AIEngine:
             )
         )
 
-        response = await self.request_with_fallback(
-            provider=provider,
-            model=model,
-            system_prompt=system_prompt,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-            temperature=0.6,
-            max_tokens=300,
+        if not model:
+
+            raise RuntimeError(
+                f"No model configured for "
+                f"provider: {provider}"
+            )
+
+        # -------------------------------------------------
+        # Request
+        # -------------------------------------------------
+
+        print(
+            "[AIEngine] proactive | "
+            f"provider={provider} | "
+            f"model={model}"
         )
 
-        response = response.strip()
+        response = (
+            await self.request_with_fallback(
+                provider=provider,
+                model=model,
+                system_prompt=system_prompt,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                temperature=0.6,
+                max_tokens=300,
+            )
+        )
+
+        response = str(
+            response
+        ).strip()
 
         if not response:
+
             return "NO_ALERT"
 
-        if response.upper().startswith("NO_ALERT"):
+        # -------------------------------------------------
+        # Normalize result
+        # -------------------------------------------------
+
+        if response.upper().startswith(
+            "NO_ALERT"
+        ):
+
             return "NO_ALERT"
 
-        if response.upper().startswith("ALERT:"):
+        if response.upper().startswith(
+            "ALERT:"
+        ):
+
             return response
 
-        return f"ALERT: {response}"
+        return (
+            f"ALERT: {response}"
+        )
