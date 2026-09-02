@@ -5,6 +5,8 @@ import threading
 class Database:
 
     CURRENT_GOOGLE_MODEL = "gemini-3.5-flash-lite"
+
+    # DM
     DM_GUILD_ID = 0
     DM_CHARACTER_NAME = "مساعد MyAI"
 
@@ -19,11 +21,19 @@ class Database:
 
         self.conn.row_factory = sqlite3.Row
 
+        # إنشاء الجداول الأساسية
         self._create_tables()
+
+        # إصلاح الجداول القديمة تلقائيًا
+        self._repair_characters_table()
         self._repair_messages_table()
         self._repair_settings_tables()
+
+        # جداول وإعدادات DM
         self._create_dm_tables()
         self._ensure_dm_character()
+
+        # تحديث النماذج القديمة
         self._migrate_old_models()
 
     # ==========================================================
@@ -145,6 +155,96 @@ class Database:
             self.conn.commit()
 
     # ==========================================================
+    # CHARACTER TABLE REPAIR
+    # ==========================================================
+
+    def _repair_characters_table(self):
+
+        with self.lock:
+            cursor = self.conn.cursor()
+
+            cursor.execute("""
+                PRAGMA table_info(characters)
+            """)
+
+            columns = cursor.fetchall()
+
+            if not columns:
+                return
+
+            names = {
+                row["name"]
+                for row in columns
+            }
+
+            # أهم Migration للمشكلة الحالية
+            if "created_by" not in names:
+                cursor.execute("""
+                    ALTER TABLE characters
+                    ADD COLUMN created_by INTEGER DEFAULT 0
+                """)
+
+                print(
+                    "✅ تمت إضافة العمود المفقود: "
+                    "characters.created_by"
+                )
+
+            # حماية إضافية
+            if "provider" not in names:
+                cursor.execute("""
+                    ALTER TABLE characters
+                    ADD COLUMN provider TEXT DEFAULT 'google'
+                """)
+
+            if "model" not in names:
+                cursor.execute("""
+                    ALTER TABLE characters
+                    ADD COLUMN model TEXT DEFAULT 'gemini-3.5-flash-lite'
+                """)
+
+            if "created_at" not in names:
+                cursor.execute("""
+                    ALTER TABLE characters
+                    ADD COLUMN created_at TIMESTAMP
+                """)
+
+                cursor.execute("""
+                    UPDATE characters
+                    SET created_at = CURRENT_TIMESTAMP
+                    WHERE created_at IS NULL
+                """)
+
+            cursor.execute("""
+                UPDATE characters
+                SET created_by = 0
+                WHERE created_by IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE characters
+                SET provider = 'google'
+                WHERE provider IS NULL
+                   OR provider = ''
+            """)
+
+            cursor.execute("""
+                UPDATE characters
+                SET model = ?
+                WHERE model IS NULL
+                   OR model = ''
+            """, (
+                self.CURRENT_GOOGLE_MODEL,
+            ))
+
+            cursor.execute("""
+                UPDATE characters
+                SET created_at = CURRENT_TIMESTAMP
+                WHERE created_at IS NULL
+            """)
+
+            self.conn.commit()
+
+    # ==========================================================
     # DM TABLE
     # ==========================================================
 
@@ -163,6 +263,10 @@ class Database:
 
             self.conn.commit()
 
+    # ==========================================================
+    # ENSURE DM CHARACTER
+    # ==========================================================
+
     def _ensure_dm_character(self):
 
         row = self.get_character(
@@ -179,13 +283,18 @@ class Database:
                 name=self.DM_CHARACTER_NAME,
                 personality=(
                     "أنت مساعد MyAI في الرسائل الخاصة. "
-                    "كن ودودًا، طبيعيًا، مفيدًا، ومختصرًا عند الحاجة. "
-                    "تحدث بالعربية أو بنفس لغة المستخدم."
+                    "كن ودودًا، طبيعيًا، مفيدًا، ومحترمًا. "
+                    "كن مختصرًا عند الحاجة. "
+                    "تحدث بالعربية أو بنفس لغة المستخدم. "
+                    "لا تدّعي تنفيذ إجراءات حقيقية لم تنفذها."
                 ),
                 provider="google",
                 model=self.CURRENT_GOOGLE_MODEL,
                 created_by=0
             )
+
+            print("✅ تم إنشاء شخصية DM الافتراضية.")
+
         except ValueError:
             pass
 
@@ -207,7 +316,10 @@ class Database:
             if not columns:
                 return
 
-            names = {row["name"] for row in columns}
+            names = {
+                row["name"]
+                for row in columns
+            }
 
             required = {
                 "id",
@@ -309,6 +421,10 @@ class Database:
         with self.lock:
             cursor = self.conn.cursor()
 
+            # --------------------------------------------------
+            # guild_settings
+            # --------------------------------------------------
+
             cursor.execute("""
                 PRAGMA table_info(guild_settings)
             """)
@@ -321,7 +437,9 @@ class Database:
             guild_missing = {
                 "active_character": "TEXT",
                 "active_provider": "TEXT DEFAULT 'google'",
-                "active_model": "TEXT DEFAULT 'gemini-3.5-flash-lite'",
+                "active_model": (
+                    "TEXT DEFAULT 'gemini-3.5-flash-lite'"
+                ),
                 "ai_enabled": "INTEGER DEFAULT 0",
                 "ai_channel_id": "INTEGER",
                 "ai_mode": "TEXT DEFAULT 'normal'",
@@ -332,13 +450,19 @@ class Database:
             }
 
             for name, definition in guild_missing.items():
+
                 if name not in guild_columns:
+
                     cursor.execute(
                         f"""
                         ALTER TABLE guild_settings
                         ADD COLUMN {name} {definition}
                         """
                     )
+
+            # --------------------------------------------------
+            # ai_config
+            # --------------------------------------------------
 
             cursor.execute("""
                 PRAGMA table_info(ai_config)
@@ -357,7 +481,9 @@ class Database:
                 "character_name": "TEXT",
                 "permission_preset": "TEXT DEFAULT 'chat'",
                 "provider": "TEXT DEFAULT 'google'",
-                "model": "TEXT DEFAULT 'gemini-3.5-flash-lite'",
+                "model": (
+                    "TEXT DEFAULT 'gemini-3.5-flash-lite'"
+                ),
                 "allow_management": "INTEGER DEFAULT 0",
                 "allow_channel_management": "INTEGER DEFAULT 0",
                 "allow_role_management": "INTEGER DEFAULT 0",
@@ -365,13 +491,19 @@ class Database:
             }
 
             for name, definition in ai_missing.items():
+
                 if name not in ai_columns:
+
                     cursor.execute(
                         f"""
                         ALTER TABLE ai_config
                         ADD COLUMN {name} {definition}
                         """
                     )
+
+            # --------------------------------------------------
+            # Defaults
+            # --------------------------------------------------
 
             cursor.execute("""
                 UPDATE guild_settings
@@ -384,7 +516,9 @@ class Database:
                 SET active_model = ?
                 WHERE active_model IS NULL
                    OR active_model = ''
-            """, (self.CURRENT_GOOGLE_MODEL,))
+            """, (
+                self.CURRENT_GOOGLE_MODEL,
+            ))
 
             cursor.execute("""
                 UPDATE guild_settings
@@ -433,7 +567,9 @@ class Database:
                 SET model = ?
                 WHERE model IS NULL
                    OR model = ''
-            """, (self.CURRENT_GOOGLE_MODEL,))
+            """, (
+                self.CURRENT_GOOGLE_MODEL,
+            ))
 
             cursor.execute("""
                 UPDATE ai_config
@@ -485,7 +621,9 @@ class Database:
 
             self.conn.commit()
 
-            print("✅ تم فحص وإصلاح جداول إعدادات MyAI.")
+            print(
+                "✅ تم فحص وإصلاح جداول إعدادات MyAI."
+            )
 
     # ==========================================================
     # MODEL MIGRATION
@@ -502,7 +640,9 @@ class Database:
                 "gemini-3.6-flash"
             )
 
-            placeholders = ",".join("?" for _ in old_models)
+            placeholders = ",".join(
+                "?" for _ in old_models
+            )
 
             cursor.execute(
                 f"""
@@ -515,7 +655,10 @@ class Database:
                     OR model = ''
                 )
                 """,
-                (self.CURRENT_GOOGLE_MODEL, *old_models)
+                (
+                    self.CURRENT_GOOGLE_MODEL,
+                    *old_models
+                )
             )
 
             cursor.execute(
@@ -529,7 +672,10 @@ class Database:
                     OR active_model = ''
                 )
                 """,
-                (self.CURRENT_GOOGLE_MODEL, *old_models)
+                (
+                    self.CURRENT_GOOGLE_MODEL,
+                    *old_models
+                )
             )
 
             cursor.execute(
@@ -543,7 +689,10 @@ class Database:
                     OR model = ''
                 )
                 """,
-                (self.CURRENT_GOOGLE_MODEL, *old_models)
+                (
+                    self.CURRENT_GOOGLE_MODEL,
+                    *old_models
+                )
             )
 
             self.conn.commit()
@@ -558,7 +707,9 @@ class Database:
             SELECT guild_id
             FROM guild_settings
             WHERE guild_id = ?
-        """, (guild_id,), fetchone=True)
+        """, (
+            guild_id,
+        ), fetchone=True)
 
         if row:
             return
@@ -597,6 +748,7 @@ class Database:
         ).lower().strip()
 
         if provider == "google":
+
             model = (
                 model
                 or self.CURRENT_GOOGLE_MODEL
@@ -608,6 +760,7 @@ class Database:
                 "gemini-3.6-flash"
             }:
                 model = self.CURRENT_GOOGLE_MODEL
+
         else:
             model = model or ""
 
@@ -630,6 +783,7 @@ class Database:
             )
 
         try:
+
             self._execute("""
                 INSERT INTO characters (
                     guild_id,
@@ -650,6 +804,7 @@ class Database:
             ), commit=True)
 
         except sqlite3.IntegrityError:
+
             raise ValueError(
                 f"الشخصية `{name}` موجودة بالفعل."
             )
@@ -659,7 +814,11 @@ class Database:
             name
         )
 
-    def get_character(self, guild_id, name):
+    def get_character(
+        self,
+        guild_id,
+        name
+    ):
 
         return self._execute("""
             SELECT *
@@ -687,17 +846,28 @@ class Database:
             character_id
         ), fetchone=True)
 
-    def get_characters(self, guild_id):
+    def get_characters(
+        self,
+        guild_id
+    ):
 
         return self._execute("""
             SELECT *
             FROM characters
             WHERE guild_id = ?
             ORDER BY created_at ASC
-        """, (guild_id,), fetchall=True)
+        """, (
+            guild_id,
+        ), fetchall=True)
 
-    def list_characters(self, guild_id):
-        return self.get_characters(guild_id)
+    def list_characters(
+        self,
+        guild_id
+    ):
+
+        return self.get_characters(
+            guild_id
+        )
 
     def update_character(
         self,
@@ -714,7 +884,9 @@ class Database:
         )
 
         if not character:
-            raise ValueError("الشخصية غير موجودة.")
+            raise ValueError(
+                "الشخصية غير موجودة."
+            )
 
         current = dict(character)
 
@@ -741,6 +913,7 @@ class Database:
         ).lower().strip()
 
         if new_provider == "google":
+
             if (
                 not new_model
                 or new_model in {
@@ -781,7 +954,10 @@ class Database:
             DELETE FROM characters
             WHERE guild_id = ?
             AND name = ?
-        """, (guild_id, name), commit=True)
+        """, (
+            guild_id,
+            name
+        ), commit=True)
 
         self._execute("""
             UPDATE guild_settings
@@ -809,15 +985,21 @@ class Database:
     # AI CONFIG
     # ==========================================================
 
-    def get_ai_config(self, guild_id):
+    def get_ai_config(
+        self,
+        guild_id
+    ):
 
         row = self._execute("""
             SELECT *
             FROM ai_config
             WHERE guild_id = ?
-        """, (guild_id,), fetchone=True)
+        """, (
+            guild_id,
+        ), fetchone=True)
 
         if not row:
+
             self._execute("""
                 INSERT INTO ai_config (
                     guild_id,
@@ -834,7 +1016,9 @@ class Database:
                 SELECT *
                 FROM ai_config
                 WHERE guild_id = ?
-            """, (guild_id,), fetchone=True)
+            """, (
+                guild_id,
+            ), fetchone=True)
 
         data = dict(row)
 
@@ -858,12 +1042,20 @@ class Database:
                     guild_id
                 ), commit=True)
 
-                data["model"] = self.CURRENT_GOOGLE_MODEL
+                data["model"] = (
+                    self.CURRENT_GOOGLE_MODEL
+                )
 
         return data
 
-    def get_guild_config(self, guild_id):
-        return self.get_ai_config(guild_id)
+    def get_guild_config(
+        self,
+        guild_id
+    ):
+
+        return self.get_ai_config(
+            guild_id
+        )
 
     def save_ai_config(
         self,
@@ -881,25 +1073,52 @@ class Database:
         allow_role_management=None
     ):
 
-        current = self.get_ai_config(guild_id)
+        current = self.get_ai_config(
+            guild_id
+        )
 
         def value(new, old):
             return old if new is None else new
 
-        enabled = value(enabled, current["enabled"])
-        channel_id = value(channel_id, current["channel_id"])
-        mode = value(mode, current["mode"])
-        reply_type = value(reply_type, current["reply_type"])
+        enabled = value(
+            enabled,
+            current["enabled"]
+        )
+
+        channel_id = value(
+            channel_id,
+            current["channel_id"]
+        )
+
+        mode = value(
+            mode,
+            current["mode"]
+        )
+
+        reply_type = value(
+            reply_type,
+            current["reply_type"]
+        )
+
         character_name = value(
             character_name,
             current["character_name"]
         )
+
         permission_preset = value(
             permission_preset,
             current["permission_preset"]
         )
-        provider = value(provider, current["provider"])
-        model = value(model, current["model"])
+
+        provider = value(
+            provider,
+            current["provider"]
+        )
+
+        model = value(
+            model,
+            current["model"]
+        )
 
         allow_management = value(
             allow_management,
@@ -921,6 +1140,7 @@ class Database:
         ).lower().strip()
 
         if provider == "google":
+
             if (
                 not model
                 or model in {
@@ -982,7 +1202,9 @@ class Database:
             int(bool(allow_role_management))
         ), commit=True)
 
-        self.ensure_guild(guild_id)
+        self.ensure_guild(
+            guild_id
+        )
 
         self._execute("""
             UPDATE guild_settings
@@ -1008,7 +1230,9 @@ class Database:
             guild_id
         ), commit=True)
 
-        return self.get_ai_config(guild_id)
+        return self.get_ai_config(
+            guild_id
+        )
 
     def update_guild_config(
         self,
@@ -1037,6 +1261,7 @@ class Database:
         values = {}
 
         for key, value in kwargs.items():
+
             if key in mapping:
                 values[mapping[key]] = value
 
@@ -1049,25 +1274,45 @@ class Database:
     # QUICK SETTINGS
     # ==========================================================
 
-    def set_ai_enabled(self, guild_id, enabled):
+    def set_ai_enabled(
+        self,
+        guild_id,
+        enabled
+    ):
+
         return self.save_ai_config(
             guild_id,
             enabled=enabled
         )
 
-    def set_ai_channel(self, guild_id, channel_id):
+    def set_ai_channel(
+        self,
+        guild_id,
+        channel_id
+    ):
+
         return self.save_ai_config(
             guild_id,
             channel_id=channel_id
         )
 
-    def set_ai_mode(self, guild_id, mode):
+    def set_ai_mode(
+        self,
+        guild_id,
+        mode
+    ):
+
         return self.save_ai_config(
             guild_id,
             mode=mode
         )
 
-    def set_reply_type(self, guild_id, reply_type):
+    def set_reply_type(
+        self,
+        guild_id,
+        reply_type
+    ):
+
         return self.save_ai_config(
             guild_id,
             reply_type=reply_type
@@ -1084,29 +1329,41 @@ class Database:
     ):
 
         if isinstance(character, int):
+
             row = self.get_character_by_id(
                 guild_id,
                 character
             )
+
         else:
+
             row = self.get_character(
                 guild_id,
                 str(character)
             )
 
         if not row:
-            raise ValueError("الشخصية غير موجودة.")
+            raise ValueError(
+                "الشخصية غير موجودة."
+            )
 
         return self.save_ai_config(
             guild_id,
             character_name=row["name"]
         )
 
-    def get_active_character(self, guild_id):
+    def get_active_character(
+        self,
+        guild_id
+    ):
 
-        config = self.get_ai_config(guild_id)
+        config = self.get_ai_config(
+            guild_id
+        )
 
-        name = config.get("character_name")
+        name = config.get(
+            "character_name"
+        )
 
         if not name:
             return None
@@ -1168,10 +1425,14 @@ class Database:
 
         try:
             limit = int(limit)
+
         except Exception:
             limit = 20
 
-        limit = max(1, min(limit, 100))
+        limit = max(
+            1,
+            min(limit, 100)
+        )
 
         rows = self._execute(f"""
             SELECT
@@ -1195,7 +1456,9 @@ class Database:
             character_name
         ), fetchall=True)
 
-        return list(reversed(rows))
+        return list(
+            reversed(rows)
+        )
 
     def clear_history(
         self,
@@ -1207,6 +1470,7 @@ class Database:
         if channel_id is not None:
 
             if character_name is not None:
+
                 self._execute("""
                     DELETE FROM messages
                     WHERE guild_id = ?
@@ -1219,6 +1483,7 @@ class Database:
                 ), commit=True)
 
             else:
+
                 self._execute("""
                     DELETE FROM messages
                     WHERE guild_id = ?
@@ -1244,24 +1509,33 @@ class Database:
             self._execute("""
                 DELETE FROM messages
                 WHERE guild_id = ?
-            """, (guild_id,), commit=True)
+            """, (
+                guild_id,
+            ), commit=True)
 
     # ==========================================================
     # DM SETTINGS
     # ==========================================================
 
-    def get_dm_enabled(self, user_id):
+    def get_dm_enabled(
+        self,
+        user_id
+    ):
 
         row = self._execute("""
             SELECT enabled
             FROM ai_dm_settings
             WHERE user_id = ?
-        """, (user_id,), fetchone=True)
+        """, (
+            user_id,
+        ), fetchone=True)
 
         if not row:
             return False
 
-        return bool(row["enabled"])
+        return bool(
+            row["enabled"]
+        )
 
     def set_dm_enabled(
         self,
@@ -1291,15 +1565,22 @@ class Database:
     # SETTINGS
     # ==========================================================
 
-    def get_settings(self, guild_id):
+    def get_settings(
+        self,
+        guild_id
+    ):
 
-        self.ensure_guild(guild_id)
+        self.ensure_guild(
+            guild_id
+        )
 
         row = self._execute("""
             SELECT *
             FROM guild_settings
             WHERE guild_id = ?
-        """, (guild_id,), fetchone=True)
+        """, (
+            guild_id,
+        ), fetchone=True)
 
         return dict(row) if row else {}
 
@@ -1307,28 +1588,37 @@ class Database:
     # STATS
     # ==========================================================
 
-    def get_stats(self, guild_id):
+    def get_stats(
+        self,
+        guild_id
+    ):
 
         messages = self._execute("""
             SELECT COUNT(*) AS count
             FROM messages
             WHERE guild_id = ?
-        """, (guild_id,), fetchone=True)
+        """, (
+            guild_id,
+        ), fetchone=True)
 
         characters = self._execute("""
             SELECT COUNT(*) AS count
             FROM characters
             WHERE guild_id = ?
-        """, (guild_id,), fetchone=True)
+        """, (
+            guild_id,
+        ), fetchone=True)
 
         return {
             "messages": (
                 messages["count"]
-                if messages else 0
+                if messages
+                else 0
             ),
             "characters": (
                 characters["count"]
-                if characters else 0
+                if characters
+                else 0
             )
         }
 
@@ -1336,7 +1626,16 @@ class Database:
     # DELETE GUILD
     # ==========================================================
 
-    def delete_guild(self, guild_id):
+    def delete_guild(
+        self,
+        guild_id
+    ):
+
+        # لا نحذف guild_id = 0
+        # لأنها شخصية DM الافتراضية.
+
+        if guild_id == self.DM_GUILD_ID:
+            return
 
         for table in (
             "messages",
@@ -1344,9 +1643,15 @@ class Database:
             "guild_settings",
             "ai_config"
         ):
+
             self._execute(
-                f"DELETE FROM {table} WHERE guild_id = ?",
-                (guild_id,),
+                f"""
+                DELETE FROM {table}
+                WHERE guild_id = ?
+                """,
+                (
+                    guild_id,
+                ),
                 commit=True
             )
 
@@ -1357,6 +1662,8 @@ class Database:
     def close(self):
 
         with self.lock:
+
             if self.conn:
+
                 self.conn.commit()
                 self.conn.close()
