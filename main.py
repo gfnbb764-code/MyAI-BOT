@@ -65,7 +65,6 @@ intents.guilds = True
 intents.messages = True
 intents.message_content = True
 
-# إضافية للتوافق والتشخيص
 intents.members = True
 intents.presences = True
 
@@ -336,12 +335,6 @@ def has_management_permission(member):
 
 
 def can_manage_ai(obj):
-    """
-    يدعم:
-    - discord.Interaction
-    - discord.Message
-    """
-
     if isinstance(obj, discord.Interaction):
         member = obj.user
 
@@ -425,7 +418,6 @@ async def generate_chat_reply(
         print(f"🧠 Model     : {model}")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        # محاولة التوقيع الكامل
         try:
             response = await ai.generate(
                 guild_id=guild_id,
@@ -439,8 +431,6 @@ async def generate_chat_reply(
             )
 
         except TypeError:
-
-            # توافق مع AIEngine الأقدم
             try:
                 response = await ai.generate(
                     guild_id=guild_id,
@@ -451,8 +441,6 @@ async def generate_chat_reply(
                 )
 
             except TypeError:
-
-                # توافق مع أبسط نسخة
                 response = await ai.generate(
                     prompt=user_text,
                 )
@@ -463,7 +451,6 @@ async def generate_chat_reply(
 
         response = str(response).strip()
 
-        # إزالة ALERT إذا رجعه AI
         response = re.sub(
             r"^\s*ALERT:\s*",
             "",
@@ -491,11 +478,8 @@ async def send_ai_response(
     chunks = split_message(response)
 
     for chunk in chunks:
-
         try:
-            await message.channel.send(
-                chunk
-            )
+            await message.channel.send(chunk)
 
         except Exception:
             print("❌ Failed to send AI response")
@@ -690,7 +674,6 @@ async def on_ready():
 async def on_socket_raw_receive(msg):
 
     try:
-
         if '"t":"MESSAGE_CREATE"' in msg:
 
             print(
@@ -718,7 +701,6 @@ async def on_message_edit(
 ):
 
     try:
-
         print(
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         )
@@ -745,7 +727,6 @@ async def on_raw_message_delete(
 ):
 
     try:
-
         print(
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         )
@@ -788,17 +769,18 @@ async def on_message(message):
             f"🤖 Is Bot     : "
             f"{message.author.bot}"
         )
-        print(
-            f"🏠 Server     : "
-            f"{message.guild.name "
-            if message.guild
-            else 'None'}"
-        )
 
+        # FIXED: لا يوجد f-string مكسور هنا
         if message.guild:
             print(
-                f"🆔 Guild ID   : "
-                f"{message.guild.id}"
+                f"🏠 Server     : {message.guild.name}"
+            )
+            print(
+                f"🆔 Guild ID   : {message.guild.id}"
+            )
+        else:
+            print(
+                "🏠 Server     : None"
             )
 
         print(
@@ -960,17 +942,6 @@ async def on_message(message):
 
         # =================================================
         # STYLE MODES
-        # =================================================
-        #
-        # هذه الأوضاع الآن تعمل كأوضاع رد فعلية.
-        #
-        # normal
-        # friendly
-        # active
-        # fun
-        # professional
-        #
-        # كلها تستجيب للرسالة مباشرة.
         # =================================================
 
         if mode in {
@@ -1319,22 +1290,15 @@ class AISetupSelect(
                 return
 
             mode = self.values[0]
-
             channel_id = interaction.channel.id
 
             save_config(
                 interaction.guild.id,
-
                 enabled=True,
-
                 channel_id=channel_id,
-
                 mode=mode,
-
                 reply_type=mode,
-
                 provider=DEFAULT_PROVIDER,
-
                 model=DEFAULT_MODEL,
             )
 
@@ -1662,14 +1626,19 @@ async def ai_status(
             DEFAULT_MODEL,
         )
 
+        channel_text = (
+            f"<#{channel_id}>"
+            if channel_id
+            else "All"
+        )
+
         await interaction.response.send_message(
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "🤖 **MYAI STATUS**\n\n"
             f"🟢 AI: "
             f"{'ON' if enabled else 'OFF'}\n"
             f"⚙️ Mode: `{mode}`\n"
-            f"📍 Channel: "
-            f"{f'<#{channel_id}>' if channel_id else 'All'}\n"
+            f"📍 Channel: {channel_text}\n"
             f"🔌 Provider: `{provider}`\n"
             f"🧠 Model: `{model}`\n"
             f"🌐 Servers: `{len(bot.guilds)}`\n"
