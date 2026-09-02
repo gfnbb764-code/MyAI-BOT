@@ -1,4 +1,5 @@
 import os
+import asyncio
 import aiohttp
 
 
@@ -125,7 +126,7 @@ class AIEngine:
         self.google_endpoint = os.getenv(
             "GOOGLE_API_ENDPOINT",
             "https://generativelanguage.googleapis.com/v1beta"
-        )
+        ).rstrip("/")
 
         self.openai_endpoint = os.getenv(
             "OPENAI_API_ENDPOINT",
@@ -206,7 +207,7 @@ class AIEngine:
 """
 
     # ========================================================
-    # Google
+    # Google Gemini
     # ========================================================
 
     async def _google(
@@ -233,14 +234,25 @@ class AIEngine:
 
         for message in messages:
 
-            role = message["role"]
-            content = message["content"]
+            if not isinstance(message, dict):
+                continue
+
+            role = message.get("role")
+            content = str(
+                message.get("content", "")
+            )
+
+            if not content:
+                continue
 
             if role == "system":
 
                 system_parts.append(content)
 
-            else:
+            elif role in (
+                "user",
+                "assistant"
+            ):
 
                 gemini_role = (
                     "model"
@@ -257,13 +269,22 @@ class AIEngine:
                     ]
                 })
 
+        if not contents:
+            raise RuntimeError(
+                "No user messages were provided to Google AI."
+            )
+
         payload = {
             "contents": contents,
             "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": max_tokens
+                "maxOutputTokens": int(max_tokens)
             }
         }
+
+        # Gemini 3.x:
+        # temperature is intentionally NOT sent.
+        # Google recommends keeping sampling parameters
+        # at their defaults for Gemini 3.x models.
 
         if system_parts:
 
@@ -291,44 +312,153 @@ class AIEngine:
             total=60
         )
 
+        print(
+            f"🤖 GOOGLE REQUEST | "
+            f"model={model} | "
+            f"messages={len(contents)}"
+        )
+
         async with aiohttp.ClientSession(
             timeout=timeout
         ) as session:
 
-            async with session.post(
-                url,
-                headers=headers,
-                json=payload
-            ) as response:
+            try:
 
-                data = await response.json()
+                async with session.post(
+                    url,
+                    headers=headers,
+                    json=payload
+                ) as response:
 
-                if response.status >= 400:
+                    raw_text = await response.text()
 
-                    raise RuntimeError(
-                        f"Google API error: {data}"
+                    print(
+                        f"🌐 Google API | "
+                        f"status={response.status}"
                     )
 
-                candidates = data.get(
-                    "candidates",
-                    []
+                    if response.status >= 400:
+
+                        print(
+                            "❌ Google API response:"
+                        )
+
+                        print(
+                            raw_text[:3000]
+                        )
+
+                        raise RuntimeError(
+                            f"Google API error "
+                            f"(HTTP {response.status}): "
+                            f"{raw_text[:1500]}"
+                        )
+
+                    try:
+
+                        data = await response.json()
+
+                    except Exception as exc:
+
+                        print(
+                            "❌ Google returned invalid JSON:"
+                        )
+
+                        print(
+                            raw_text[:3000]
+                        )
+
+                        raise RuntimeError(
+                            "Google API returned invalid JSON."
+                        ) from exc
+
+                    candidates = data.get(
+                        "candidates",
+                        []
+                    )
+
+                    if not candidates:
+
+                        print(
+                            "⚠️ Google returned "
+                            "no candidates:"
+                        )
+
+                        print(
+                            str(data)[:3000]
+                        )
+
+                        return ""
+
+                    first_candidate = candidates[0]
+
+                    content = first_candidate.get(
+                        "content",
+                        {}
+                    )
+
+                    parts = content.get(
+                        "parts",
+                        []
+                    )
+
+                    text_parts = []
+
+                    for part in parts:
+
+                        if not isinstance(
+                            part,
+                            dict
+                        ):
+                            continue
+
+                        text = part.get(
+                            "text"
+                        )
+
+                        if text:
+                            text_parts.append(
+                                str(text)
+                            )
+
+                    text = "".join(
+                        text_parts
+                    ).strip()
+
+                    if not text:
+
+                        finish_reason = (
+                            first_candidate.get(
+                                "finishReason"
+                            )
+                        )
+
+                        print(
+                            "⚠️ Google returned "
+                            "an empty response | "
+                            f"finishReason={finish_reason}"
+                        )
+
+                    else:
+
+                        print(
+                            f"✅ Google response received | "
+                            f"length={len(text)}"
+                        )
+
+                    return text
+
+            except asyncio.TimeoutError:
+
+                raise RuntimeError(
+                    "Google API request timed out "
+                    "after 60 seconds."
                 )
 
-                if not candidates:
-                    return ""
+            except aiohttp.ClientError as exc:
 
-                parts = (
-                    candidates[0]
-                    .get("content", {})
-                    .get("parts", [])
-                )
-
-                text = "".join(
-                    part.get("text", "")
-                    for part in parts
-                )
-
-                return text.strip()
+                raise RuntimeError(
+                    f"Google network error: {exc}"
+                ) from exc
 
     # ========================================================
     # OpenAI
@@ -347,6 +477,9 @@ class AIEngine:
                 "OpenAI API key is not configured."
             )
 
+        if not model:
+            model = DEFAULT_MODELS["openai"]
+
         payload = {
             "model": model,
             "messages": messages,
@@ -355,7 +488,9 @@ class AIEngine:
         }
 
         headers = {
-            "Authorization": f"Bearer {self.openai_key}",
+            "Authorization": (
+                f"Bearer {self.openai_key}"
+            ),
             "Content-Type": "application/json"
         }
 
@@ -363,43 +498,115 @@ class AIEngine:
             total=60
         )
 
+        print(
+            f"🤖 OPENAI REQUEST | "
+            f"model={model}"
+        )
+
         async with aiohttp.ClientSession(
             timeout=timeout
         ) as session:
 
-            async with session.post(
-                self.openai_endpoint,
-                headers=headers,
-                json=payload
-            ) as response:
+            try:
 
-                data = await response.json()
+                async with session.post(
+                    self.openai_endpoint,
+                    headers=headers,
+                    json=payload
+                ) as response:
 
-                if response.status >= 400:
+                    raw_text = await response.text()
 
-                    raise RuntimeError(
-                        f"OpenAI API error: {data}"
+                    print(
+                        f"🌐 OpenAI API | "
+                        f"status={response.status}"
                     )
 
-                choices = data.get(
-                    "choices",
-                    []
+                    if response.status >= 400:
+
+                        print(
+                            f"❌ OpenAI API response: "
+                            f"{raw_text[:3000]}"
+                        )
+
+                        raise RuntimeError(
+                            f"OpenAI API error "
+                            f"(HTTP {response.status}): "
+                            f"{raw_text[:1500]}"
+                        )
+
+                    try:
+
+                        data = await response.json()
+
+                    except Exception as exc:
+
+                        raise RuntimeError(
+                            "OpenAI API returned invalid JSON."
+                        ) from exc
+
+                    choices = data.get(
+                        "choices",
+                        []
+                    )
+
+                    if not choices:
+                        return ""
+
+                    message = choices[0].get(
+                        "message",
+                        {}
+                    )
+
+                    content = message.get(
+                        "content",
+                        ""
+                    )
+
+                    if isinstance(
+                        content,
+                        list
+                    ):
+
+                        text_parts = []
+
+                        for item in content:
+
+                            if not isinstance(
+                                item,
+                                dict
+                            ):
+                                continue
+
+                            text = item.get(
+                                "text"
+                            )
+
+                            if text:
+                                text_parts.append(
+                                    str(text)
+                                )
+
+                        content = "".join(
+                            text_parts
+                        )
+
+                    return str(
+                        content
+                    ).strip()
+
+            except asyncio.TimeoutError:
+
+                raise RuntimeError(
+                    "OpenAI API request timed out "
+                    "after 60 seconds."
                 )
 
-                if not choices:
-                    return ""
+            except aiohttp.ClientError as exc:
 
-                message = choices[0].get(
-                    "message",
-                    {}
-                )
-
-                content = message.get(
-                    "content",
-                    ""
-                )
-
-                return content.strip()
+                raise RuntimeError(
+                    f"OpenAI network error: {exc}"
+                ) from exc
 
     # ========================================================
     # Anthropic
@@ -418,13 +625,24 @@ class AIEngine:
                 "Anthropic API key is not configured."
             )
 
+        if not model:
+            model = DEFAULT_MODELS["anthropic"]
+
         system_parts = []
         chat_messages = []
 
         for message in messages:
 
-            role = message["role"]
-            content = message["content"]
+            if not isinstance(message, dict):
+                continue
+
+            role = message.get("role")
+            content = str(
+                message.get("content", "")
+            )
+
+            if not content:
+                continue
 
             if role == "system":
 
@@ -432,7 +650,10 @@ class AIEngine:
                     content
                 )
 
-            else:
+            elif role in (
+                "user",
+                "assistant"
+            ):
 
                 chat_messages.append({
                     "role": role,
@@ -441,15 +662,17 @@ class AIEngine:
 
         payload = {
             "model": model,
-            "max_tokens": max_tokens,
+            "max_tokens": int(max_tokens),
             "messages": chat_messages,
-            "temperature": temperature
+            "temperature": float(temperature)
         }
 
         if system_parts:
 
             payload["system"] = (
-                "\n\n".join(system_parts)
+                "\n\n".join(
+                    system_parts
+                )
             )
 
         headers = {
@@ -462,36 +685,98 @@ class AIEngine:
             total=60
         )
 
+        print(
+            f"🤖 ANTHROPIC REQUEST | "
+            f"model={model}"
+        )
+
         async with aiohttp.ClientSession(
             timeout=timeout
         ) as session:
 
-            async with session.post(
-                self.anthropic_endpoint,
-                headers=headers,
-                json=payload
-            ) as response:
+            try:
 
-                data = await response.json()
+                async with session.post(
+                    self.anthropic_endpoint,
+                    headers=headers,
+                    json=payload
+                ) as response:
 
-                if response.status >= 400:
+                    raw_text = await response.text()
 
-                    raise RuntimeError(
-                        f"Anthropic API error: {data}"
+                    print(
+                        f"🌐 Anthropic API | "
+                        f"status={response.status}"
                     )
 
-                blocks = data.get(
-                    "content",
-                    []
+                    if response.status >= 400:
+
+                        print(
+                            f"❌ Anthropic API response: "
+                            f"{raw_text[:3000]}"
+                        )
+
+                        raise RuntimeError(
+                            f"Anthropic API error "
+                            f"(HTTP {response.status}): "
+                            f"{raw_text[:1500]}"
+                        )
+
+                    try:
+
+                        data = await response.json()
+
+                    except Exception as exc:
+
+                        raise RuntimeError(
+                            "Anthropic API returned invalid JSON."
+                        ) from exc
+
+                    blocks = data.get(
+                        "content",
+                        []
+                    )
+
+                    text_parts = []
+
+                    for block in blocks:
+
+                        if not isinstance(
+                            block,
+                            dict
+                        ):
+                            continue
+
+                        if block.get(
+                            "type"
+                        ) != "text":
+                            continue
+
+                        text = block.get(
+                            "text"
+                        )
+
+                        if text:
+                            text_parts.append(
+                                str(text)
+                            )
+
+                    return "".join(
+                        text_parts
+                    ).strip()
+
+            except asyncio.TimeoutError:
+
+                raise RuntimeError(
+                    "Anthropic API request timed out "
+                    "after 60 seconds."
                 )
 
-                text = "".join(
-                    block.get("text", "")
-                    for block in blocks
-                    if block.get("type") == "text"
-                )
+            except aiohttp.ClientError as exc:
 
-                return text.strip()
+                raise RuntimeError(
+                    f"Anthropic network error: {exc}"
+                ) from exc
 
     # ========================================================
     # Request Router
@@ -516,6 +801,12 @@ class AIEngine:
             model = DEFAULT_MODELS.get(
                 provider
             )
+
+        print(
+            f"🧠 AI REQUEST ROUTER | "
+            f"provider={provider} | "
+            f"model={model}"
+        )
 
         if provider == "google":
 
@@ -564,6 +855,13 @@ class AIEngine:
         mode=None
     ):
 
+        print(
+            f"🧠 GENERATE START | "
+            f"guild={guild_id} | "
+            f"channel={channel_id} | "
+            f"character={character_name}"
+        )
+
         character = self.db.get_character(
             guild_id,
             character_name
@@ -574,6 +872,7 @@ class AIEngine:
         )
 
         if not character:
+
             raise ValueError(
                 "Character not found."
             )
@@ -598,6 +897,7 @@ class AIEngine:
             provider == "google"
             and model == "gemini-2.5-flash"
         ):
+
             model = "gemini-3.6-flash"
 
         messages = [
@@ -619,7 +919,9 @@ class AIEngine:
 
         for item in history:
 
-            item = self.row_to_dict(item)
+            item = self.row_to_dict(
+                item
+            )
 
             if not item:
                 continue
@@ -652,23 +954,40 @@ class AIEngine:
             "content": str(user_message)
         })
 
-        response = await self.request(
-            provider=provider,
-            model=model,
-            messages=messages,
-            temperature=mode_config[
-                "temperature"
-            ],
-            max_tokens=mode_config[
-                "max_tokens"
-            ]
-        )
+        try:
+
+            response = await self.request(
+                provider=provider,
+                model=model,
+                messages=messages,
+                temperature=mode_config[
+                    "temperature"
+                ],
+                max_tokens=mode_config[
+                    "max_tokens"
+                ]
+            )
+
+        except Exception as exc:
+
+            print(
+                f"❌ AI GENERATE ERROR | "
+                f"provider={provider} | "
+                f"model={model} | "
+                f"error={type(exc).__name__}: {exc}"
+            )
+
+            raise
 
         if not response:
 
             raise RuntimeError(
                 "AI returned an empty response."
             )
+
+        response = str(
+            response
+        ).strip()
 
         self.db.add_message(
             guild_id=guild_id,
@@ -686,6 +1005,11 @@ class AIEngine:
             character_name=character_name,
             role="assistant",
             content=response
+        )
+
+        print(
+            f"✅ GENERATE SUCCESS | "
+            f"characters={len(response)}"
         )
 
         return response
@@ -713,6 +1037,7 @@ class AIEngine:
         )
 
         if not character:
+
             raise ValueError(
                 "Character not found."
             )
@@ -769,7 +1094,9 @@ NO_ALERT
 
         for item in history:
 
-            item = self.row_to_dict(item)
+            item = self.row_to_dict(
+                item
+            )
 
             if not item:
                 continue
@@ -834,21 +1161,37 @@ NO_ALERT
             provider == "google"
             and model == "gemini-2.5-flash"
         ):
+
             model = "gemini-3.6-flash"
 
-        response = await self.request(
-            provider=provider,
-            model=model,
-            messages=messages,
-            temperature=0.55,
-            max_tokens=800
-        )
+        try:
+
+            response = await self.request(
+                provider=provider,
+                model=model,
+                messages=messages,
+                temperature=0.55,
+                max_tokens=800
+            )
+
+        except Exception as exc:
+
+            print(
+                f"❌ PROACTIVE AI ERROR | "
+                f"provider={provider} | "
+                f"model={model} | "
+                f"error={type(exc).__name__}: {exc}"
+            )
+
+            raise
 
         if not response:
 
             return None
 
-        response = response.strip()
+        response = str(
+            response
+        ).strip()
 
         if response.upper() == "NO_ALERT":
 
