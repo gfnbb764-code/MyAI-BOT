@@ -18,6 +18,7 @@ class Database:
         self.conn.row_factory = sqlite3.Row
 
         self._create_tables()
+        self._repair_messages_table()
         self._migrate_old_models()
 
     # ==========================================================
@@ -52,7 +53,6 @@ class Database:
             except Exception:
                 if commit:
                     self.conn.rollback()
-
                 raise
 
     # ==========================================================
@@ -62,7 +62,6 @@ class Database:
     def _create_tables(self):
 
         with self.lock:
-
             cursor = self.conn.cursor()
 
             cursor.execute("""
@@ -141,6 +140,134 @@ class Database:
             self.conn.commit()
 
     # ==========================================================
+    # REPAIR OLD MESSAGES TABLE
+    # ==========================================================
+
+    def _repair_messages_table(self):
+
+        with self.lock:
+
+            cursor = self.conn.cursor()
+
+            cursor.execute("""
+                PRAGMA table_info(messages)
+            """)
+
+            columns = cursor.fetchall()
+
+            if not columns:
+                return
+
+            column_names = {
+                row["name"]
+                for row in columns
+            }
+
+            required = {
+                "id",
+                "guild_id",
+                "channel_id",
+                "user_id",
+                "character_name",
+                "role",
+                "content",
+                "created_at"
+            }
+
+            # إذا الجدول ناقص أعمدة أساسية،
+            # نعيد بناءه بشكل آمن.
+            if not required.issubset(column_names):
+
+                cursor.execute("""
+                    ALTER TABLE messages
+                    RENAME TO messages_old
+                """)
+
+                cursor.execute("""
+                    CREATE TABLE messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        guild_id INTEGER NOT NULL,
+                        channel_id INTEGER NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        character_name TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        created_at TIMESTAMP NOT NULL
+                    )
+                """)
+
+                old_columns = {
+                    row["name"]
+                    for row in cursor.execute(
+                        "PRAGMA table_info(messages_old)"
+                    ).fetchall()
+                }
+
+                if {
+                    "guild_id",
+                    "channel_id",
+                    "user_id",
+                    "character_name",
+                    "role",
+                    "content"
+                }.issubset(old_columns):
+
+                    created_expr = (
+                        "created_at"
+                        if "created_at" in old_columns
+                        else "CURRENT_TIMESTAMP"
+                    )
+
+                    cursor.execute(f"""
+                        INSERT INTO messages (
+                            guild_id,
+                            channel_id,
+                            user_id,
+                            character_name,
+                            role,
+                            content,
+                            created_at
+                        )
+                        SELECT
+                            guild_id,
+                            channel_id,
+                            user_id,
+                            character_name,
+                            role,
+                            content,
+                            COALESCE(
+                                {created_expr},
+                                CURRENT_TIMESTAMP
+                            )
+                        FROM messages_old
+                    """)
+
+                cursor.execute("""
+                    DROP TABLE messages_old
+                """)
+
+            # إصلاح أي created_at NULL في البيانات القديمة
+            cursor.execute("""
+                UPDATE messages
+                SET created_at = CURRENT_TIMESTAMP
+                WHERE created_at IS NULL
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS
+                idx_messages_guild_channel
+                ON messages(guild_id, channel_id)
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS
+                idx_messages_character
+                ON messages(guild_id, character_name)
+            """)
+
+            self.conn.commit()
+
+    # ==========================================================
     # MODEL MIGRATION
     # ==========================================================
 
@@ -202,11 +329,7 @@ class Database:
                 active_provider,
                 active_model
             )
-            VALUES (
-                ?,
-                'google',
-                ?
-            )
+            VALUES (?, 'google', ?)
         """, (
             guild_id,
             self.CURRENT_GOOGLE_MODEL
@@ -238,7 +361,6 @@ class Database:
                 model = self.CURRENT_GOOGLE_MODEL
 
         else:
-
             model = model or ""
 
         if not name:
@@ -450,11 +572,7 @@ class Database:
                     provider,
                     model
                 )
-                VALUES (
-                    ?,
-                    'google',
-                    ?
-                )
+                VALUES (?, 'google', ?)
             """, (
                 guild_id,
                 self.CURRENT_GOOGLE_MODEL
@@ -599,7 +717,6 @@ class Database:
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 CURRENT_TIMESTAMP
             )
-
             ON CONFLICT(guild_id)
             DO UPDATE SET
                 enabled = excluded.enabled,
@@ -610,8 +727,7 @@ class Database:
                 permission_preset = excluded.permission_preset,
                 provider = excluded.provider,
                 model = excluded.model,
-                allow_management =
-                    excluded.allow_management,
+                allow_management = excluded.allow_management,
                 allow_channel_management =
                     excluded.allow_channel_management,
                 allow_role_management =
@@ -668,41 +784,25 @@ class Database:
     # QUICK SETTINGS
     # ==========================================================
 
-    def set_ai_enabled(
-        self,
-        guild_id,
-        enabled
-    ):
+    def set_ai_enabled(self, guild_id, enabled):
         return self.save_ai_config(
             guild_id,
             enabled=enabled
         )
 
-    def set_ai_channel(
-        self,
-        guild_id,
-        channel_id
-    ):
+    def set_ai_channel(self, guild_id, channel_id):
         return self.save_ai_config(
             guild_id,
             channel_id=channel_id
         )
 
-    def set_ai_mode(
-        self,
-        guild_id,
-        mode
-    ):
+    def set_ai_mode(self, guild_id, mode):
         return self.save_ai_config(
             guild_id,
             mode=mode
         )
 
-    def set_reply_type(
-        self,
-        guild_id,
-        reply_type
-    ):
+    def set_reply_type(self, guild_id, reply_type):
         return self.save_ai_config(
             guild_id,
             reply_type=reply_type
@@ -748,9 +848,8 @@ class Database:
         if not content:
             return
 
-        # مهم:
-        # created_at يتم إدخاله صراحةً
-        # حتى تعمل قاعدة البيانات القديمة والجديدة.
+        # مهم جدًا:
+        # يتم إرسال created_at صراحةً.
         self._execute("""
             INSERT INTO messages (
                 guild_id,
@@ -784,7 +883,6 @@ class Database:
 
         try:
             limit = int(limit)
-
         except Exception:
             limit = 20
 
@@ -893,11 +991,7 @@ class Database:
             guild_id,
         ), fetchone=True)
 
-        return (
-            dict(row)
-            if row
-            else {}
-        )
+        return dict(row) if row else {}
 
     # ==========================================================
     # STATS
@@ -925,15 +1019,8 @@ class Database:
         ), fetchone=True)
 
         return {
-            "messages":
-                messages["count"]
-                if messages
-                else 0,
-
-            "characters":
-                characters["count"]
-                if characters
-                else 0
+            "messages": messages["count"] if messages else 0,
+            "characters": characters["count"] if characters else 0
         }
 
     # ==========================================================
