@@ -26,7 +26,6 @@ AUTO_COOLDOWN_SECONDS = 300
 # =========================================================
 
 intents = discord.Intents.default()
-
 intents.guilds = True
 intents.messages = True
 intents.message_content = True
@@ -103,25 +102,53 @@ def save_config(guild_id, **kwargs):
         return None
 
 
+def row_to_dict(row):
+
+    if row is None:
+        return None
+
+    if isinstance(row, dict):
+        return row
+
+    try:
+        return dict(row)
+
+    except Exception:
+        try:
+            return {
+                key: row[key]
+                for key in row.keys()
+            }
+        except Exception:
+            return row
+
+
 def get_character(guild_id, character_name):
 
     try:
-        if character_name:
-            return db.get_character(
-                guild_id,
-                character_name
-            )
+
+        if not character_name:
+            return None
+
+        character = db.get_character(
+            guild_id,
+            character_name
+        )
+
+        return row_to_dict(character)
 
     except Exception:
         print("❌ Failed to get character:")
         traceback.print_exc()
 
-    return None
+        return None
 
 
 def get_active_character(guild_id, config):
 
-    character_name = config.get("character_name")
+    character_name = config.get(
+        "character_name"
+    )
 
     character = get_character(
         guild_id,
@@ -132,10 +159,16 @@ def get_active_character(guild_id, config):
         return character
 
     try:
-        characters = db.get_characters(guild_id)
+
+        characters = db.get_characters(
+            guild_id
+        )
 
         if characters:
-            return characters[0]
+
+            return row_to_dict(
+                characters[0]
+            )
 
     except Exception:
         print("❌ Failed to get guild characters:")
@@ -159,16 +192,30 @@ def split_message(text, limit=1900):
 
     while len(text) > limit:
 
-        split_at = text.rfind("\n", 0, limit)
+        split_at = text.rfind(
+            "\n",
+            0,
+            limit
+        )
 
         if split_at <= 0:
-            split_at = text.rfind(" ", 0, limit)
+
+            split_at = text.rfind(
+                " ",
+                0,
+                limit
+            )
 
         if split_at <= 0:
             split_at = limit
 
-        chunks.append(text[:split_at])
-        text = text[split_at:].lstrip()
+        chunks.append(
+            text[:split_at]
+        )
+
+        text = text[
+            split_at:
+        ].lstrip()
 
     if text:
         chunks.append(text)
@@ -176,21 +223,34 @@ def split_message(text, limit=1900):
     return chunks
 
 
-async def send_ai_response(message, response):
+async def send_ai_response(
+    message,
+    response
+):
 
     if not response:
         return
 
-    chunks = split_message(response)
+    chunks = split_message(
+        response
+    )
 
     for chunk in chunks:
 
         try:
-            await message.channel.send(chunk)
+
+            await message.channel.send(
+                chunk
+            )
 
         except Exception:
-            print("❌ Failed to send AI response:")
+
+            print(
+                "❌ Failed to send AI response:"
+            )
+
             traceback.print_exc()
+
             return
 
 
@@ -198,7 +258,9 @@ async def send_ai_response(message, response):
 # PERMISSIONS
 # =========================================================
 
-def has_management_permission(member: discord.Member):
+def has_management_permission(
+    member: discord.Member
+):
 
     if member.guild.owner_id == member.id:
         return True
@@ -227,17 +289,24 @@ def has_management_permission(member: discord.Member):
     )
 
 
-def can_manage_ai(interaction: discord.Interaction):
+def can_manage_ai(
+    interaction: discord.Interaction
+):
 
     if not interaction.guild:
         return False
 
     member = interaction.user
 
-    if not isinstance(member, discord.Member):
+    if not isinstance(
+        member,
+        discord.Member
+    ):
         return False
 
-    return has_management_permission(member)
+    return has_management_permission(
+        member
+    )
 
 
 # =========================================================
@@ -288,12 +357,13 @@ def normalize_text(text):
 # DIRECT BOT DETECTION
 # =========================================================
 
-def is_directed_to_bot(message: discord.Message):
+def is_directed_to_bot(
+    message: discord.Message
+):
 
     if bot.user is None:
         return False
 
-    # Real Discord mention
     if bot.user in message.mentions:
         return True
 
@@ -307,13 +377,19 @@ def is_directed_to_bot(message: discord.Message):
     names = []
 
     if bot.user.name:
+
         names.append(
-            normalize_text(bot.user.name)
+            normalize_text(
+                bot.user.name
+            )
         )
 
     if bot.user.display_name:
+
         names.append(
-            normalize_text(bot.user.display_name)
+            normalize_text(
+                bot.user.display_name
+            )
         )
 
     names = [
@@ -324,7 +400,9 @@ def is_directed_to_bot(message: discord.Message):
 
     for name in names:
 
-        escaped = re.escape(name)
+        escaped = re.escape(
+            name
+        )
 
         patterns = [
 
@@ -349,6 +427,7 @@ def is_directed_to_bot(message: discord.Message):
                 content,
                 re.IGNORECASE
             ):
+
                 return True
 
     return False
@@ -365,23 +444,35 @@ async def generate_chat_reply(
     user_message
 ):
 
-    provider = config.get("provider")
-    model = config.get("model")
-    mode = config.get("mode")
+    provider = config.get(
+        "provider"
+    )
+
+    model = config.get(
+        "model"
+    )
+
+    mode = config.get(
+        "mode"
+    )
+
+    character_name = character.get(
+        "name"
+    )
 
     print(
         "🧠 AI REQUEST | "
         f"provider={provider} | "
         f"model={model} | "
         f"mode={mode} | "
-        f"character={character.get('name')}"
+        f"character={character_name}"
     )
 
     response = await ai.generate(
         guild_id=message.guild.id,
         channel_id=message.channel.id,
         user_id=message.author.id,
-        character_name=character.get("name"),
+        character_name=character_name,
         user_message=user_message,
         provider=provider,
         model=model,
@@ -389,11 +480,16 @@ async def generate_chat_reply(
     )
 
     if not response:
-        print("⚠️ AI returned an empty response.")
+
+        print(
+            "⚠️ AI returned an empty response."
+        )
+
         return
 
     print(
-        f"✅ AI RESPONSE RECEIVED | length={len(response)}"
+        "✅ AI RESPONSE RECEIVED | "
+        f"length={len(response)}"
     )
 
     await send_ai_response(
@@ -422,18 +518,23 @@ async def handle_auto_ai(
         + 1
     )
 
-    auto_message_counters[channel_id] = current_count
+    auto_message_counters[
+        channel_id
+    ] = current_count
 
     print(
-        f"🤖 AUTO COUNTER | "
+        "🤖 AUTO COUNTER | "
         f"channel={channel_id} | "
-        f"count={current_count}/{AUTO_CHECK_MESSAGE_COUNT}"
+        f"count={current_count}/"
+        f"{AUTO_CHECK_MESSAGE_COUNT}"
     )
 
     if current_count < AUTO_CHECK_MESSAGE_COUNT:
         return
 
-    auto_message_counters[channel_id] = 0
+    auto_message_counters[
+        channel_id
+    ] = 0
 
     now = time.time()
 
@@ -447,40 +548,61 @@ async def handle_auto_ai(
     if elapsed < AUTO_COOLDOWN_SECONDS:
 
         remaining = int(
-            AUTO_COOLDOWN_SECONDS - elapsed
+            AUTO_COOLDOWN_SECONDS
+            - elapsed
         )
 
         print(
-            f"⏳ AUTO COOLDOWN | "
+            "⏳ AUTO COOLDOWN | "
             f"remaining={remaining}s"
         )
 
         return
 
-    auto_last_check[channel_id] = now
+    auto_last_check[
+        channel_id
+    ] = now
 
-    print("🤖 Running proactive AI check...")
+    print(
+        "🤖 Running proactive AI check..."
+    )
 
     response = await ai.generate_proactive(
         guild_id=message.guild.id,
         channel_id=message.channel.id,
-        character_name=character.get("name"),
-        provider=config.get("provider"),
-        model=config.get("model")
+        character_name=character.get(
+            "name"
+        ),
+        provider=config.get(
+            "provider"
+        ),
+        model=config.get(
+            "model"
+        )
     )
 
     if not response:
-        print("⚠️ Proactive AI returned nothing.")
+
+        print(
+            "⚠️ Proactive AI returned nothing."
+        )
+
         return
 
-    response = str(response).strip()
+    response = str(
+        response
+    ).strip()
 
     if response.upper() == "NO_ALERT":
-        print("🤖 AI decided: NO_ALERT")
+
+        print(
+            "🤖 AI decided: NO_ALERT"
+        )
+
         return
 
     print(
-        f"🚨 Proactive AI alert received | "
+        "🚨 Proactive AI alert received | "
         f"length={len(response)}"
     )
 
@@ -503,10 +625,13 @@ async def on_ready():
     )
 
     print(
-        f"🌐 Connected to {len(bot.guilds)} server(s)."
+        f"🌐 Connected to "
+        f"{len(bot.guilds)} server(s)."
     )
 
-    print("🧠 AI message system is ready.")
+    print(
+        "🧠 AI message system is ready."
+    )
 
     print(
         "📡 Message Content Intent:",
@@ -519,14 +644,12 @@ async def on_ready():
 # =========================================================
 
 @bot.event
-async def on_message(message: discord.Message):
-
-    # =====================================================
-    # MESSAGE EVENT DEBUG
-    # =====================================================
+async def on_message(
+    message: discord.Message
+):
 
     print(
-        f"📩 MESSAGE EVENT | "
+        "📩 MESSAGE EVENT | "
         f"author={message.author} | "
         f"bot={message.author.bot} | "
         f"guild={message.guild} | "
@@ -593,7 +716,8 @@ async def on_message(message: discord.Message):
     if config is None:
 
         print(
-            f"❌ No AI config for guild {guild_id}"
+            f"❌ No AI config "
+            f"for guild {guild_id}"
         )
 
         return
@@ -641,13 +765,14 @@ async def on_message(message: discord.Message):
     if character is None:
 
         print(
-            f"❌ No AI character for guild {guild_id}"
+            f"❌ No AI character "
+            f"for guild {guild_id}"
         )
 
         return
 
     print(
-        f"🧠 Character loaded: "
+        "🧠 Character loaded: "
         f"{character.get('name')}"
     )
 
@@ -683,7 +808,8 @@ async def on_message(message: discord.Message):
         if bot.user not in message.mentions:
 
             print(
-                "⏭️ Message does not mention MyAI."
+                "⏭️ Message does not "
+                "mention MyAI."
             )
 
             return
@@ -698,10 +824,13 @@ async def on_message(message: discord.Message):
 
         if not user_message:
 
-            user_message = "السلام عليكم"
+            user_message = (
+                "السلام عليكم"
+            )
 
         print(
-            "🚀 Sending mention message to AI: "
+            "🚀 Sending mention "
+            "message to AI: "
             f"{user_message!r}"
         )
 
@@ -763,7 +892,7 @@ async def on_message(message: discord.Message):
             return
 
         print(
-            f"💬 Configured channel: "
+            "💬 Configured channel: "
             f"{configured_channel}"
         )
 
@@ -790,7 +919,8 @@ async def on_message(message: discord.Message):
             return
 
         print(
-            "🚀 Sending channel message to AI: "
+            "🚀 Sending channel "
+            "message to AI: "
             f"{content!r}"
         )
 
@@ -861,7 +991,8 @@ async def on_message(message: discord.Message):
             return
 
         print(
-            "🚀 Sending direct message to AI: "
+            "🚀 Sending direct "
+            "message to AI: "
             f"{user_message!r}"
         )
 
@@ -927,7 +1058,7 @@ async def on_message(message: discord.Message):
     # =====================================================
 
     print(
-        f"⚠️ Unknown reply_type: "
+        "⚠️ Unknown reply_type: "
         f"{reply_type!r}"
     )
 
@@ -987,15 +1118,32 @@ async def ai_command(
 
     try:
 
+        character_name = character.get(
+            "name"
+        )
+
+        print(
+            "🧠 /ai REQUEST | "
+            f"character={character_name} | "
+            f"provider={config.get('provider')} | "
+            f"model={config.get('model')}"
+        )
+
         response = await ai.generate(
             guild_id=guild_id,
             channel_id=interaction.channel.id,
             user_id=interaction.user.id,
-            character_name=character.get("name"),
+            character_name=character_name,
             user_message=message,
-            provider=config.get("provider"),
-            model=config.get("model"),
-            mode=config.get("mode")
+            provider=config.get(
+                "provider"
+            ),
+            model=config.get(
+                "model"
+            ),
+            mode=config.get(
+                "mode"
+            )
         )
 
         if not response:
@@ -1280,7 +1428,12 @@ async def ai_setup(
         name="الحالة",
         value=(
             "🟢 مفعّل"
-            if bool(config.get("enabled", 0))
+            if bool(
+                config.get(
+                    "enabled",
+                    0
+                )
+            )
             else "🔴 معطّل"
         ),
         inline=True
@@ -1419,6 +1572,10 @@ async def character_list(
 
         for character in characters:
 
+            character = row_to_dict(
+                character
+            )
+
             lines.append(
                 f"• **{character.get('name')}** — "
                 f"{character.get('personality', 'بدون وصف')}"
@@ -1500,11 +1657,14 @@ async def character_use(
 
     save_config(
         interaction.guild.id,
-        character_name=character.get("name")
+        character_name=character.get(
+            "name"
+        )
     )
 
     await interaction.response.send_message(
-        f"🧠 تم اختيار الشخصية **{character.get('name')}**."
+        "🧠 تم اختيار الشخصية "
+        f"**{character.get('name')}**."
     )
 
 
