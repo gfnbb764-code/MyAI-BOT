@@ -20,42 +20,37 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 AUTO_CHECK_MESSAGE_COUNT = 30
 AUTO_COOLDOWN_SECONDS = 300
 
-# حماية Bot-to-Bot
 BOT_CHAT_MAX_REPLIES = 100
 BOT_CHAT_COOLDOWN_SECONDS = 2
 
 
 # =========================================================
-# AI PROVIDER CONFIG
+# AI CONFIG
 # =========================================================
 
 AI_PROVIDER = os.getenv(
     "PRIMARY_AI_PROVIDER",
-    "google",
+    "google"
 ).lower().strip()
 
 AI_MODEL = os.getenv(
     "GOOGLE_MODEL",
-    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash-lite"
 ).strip()
 
 if AI_PROVIDER not in {
     "openai",
     "google",
-    "anthropic",
+    "anthropic"
 }:
-
     AI_PROVIDER = "google"
-
     AI_MODEL = os.getenv(
         "GOOGLE_MODEL",
-        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash-lite"
     ).strip()
 
 print(
-    "🤖 AI CONFIG | "
-    f"provider={AI_PROVIDER} | "
-    f"model={AI_MODEL}"
+    f"🤖 AI CONFIG | provider={AI_PROVIDER} | model={AI_MODEL}"
 )
 
 
@@ -75,10 +70,7 @@ AI_MODES = {
 def get_ai_mode(config):
 
     mode = str(
-        config.get(
-            "mode",
-            "normal",
-        )
+        config.get("mode", "normal")
     ).lower().strip()
 
     if mode not in AI_MODES:
@@ -99,7 +91,7 @@ intents.message_content = True
 
 
 # =========================================================
-# DATABASE + AI
+# DATABASE / AI
 # =========================================================
 
 db = Database()
@@ -127,7 +119,7 @@ class MyAIBot(commands.Bot):
 
         super().__init__(
             command_prefix="!",
-            intents=intents,
+            intents=intents
         )
 
     async def setup_hook(self):
@@ -207,7 +199,6 @@ def row_to_dict(row):
         return row
 
     try:
-
         return dict(row)
 
     except Exception:
@@ -295,7 +286,7 @@ def get_active_character(
 
 
 # =========================================================
-# CHANNEL ID
+# CHANNEL
 # =========================================================
 
 def normalize_channel_id(
@@ -324,32 +315,32 @@ def channel_matches(
     configured_channel_id
 ):
 
-    current_channel_id = normalize_channel_id(
+    current = normalize_channel_id(
         message.channel.id
     )
 
-    saved_channel_id = normalize_channel_id(
+    configured = normalize_channel_id(
         configured_channel_id
     )
 
-    matches = (
-        current_channel_id is not None
-        and saved_channel_id is not None
-        and current_channel_id == saved_channel_id
+    result = (
+        current is not None
+        and configured is not None
+        and current == configured
     )
 
     print(
         "📍 CHANNEL CHECK | "
-        f"current={current_channel_id} | "
-        f"configured={saved_channel_id} | "
-        f"match={matches}"
+        f"current={current} | "
+        f"configured={configured} | "
+        f"match={result}"
     )
 
-    return matches
+    return result
 
 
 # =========================================================
-# MESSAGE HELPERS
+# MESSAGE SPLITTER
 # =========================================================
 
 def split_message(
@@ -392,12 +383,14 @@ def split_message(
         ].lstrip()
 
     if text:
-        chunks.append(
-            text
-        )
+        chunks.append(text)
 
     return chunks
 
+
+# =========================================================
+# SEND AI RESPONSE
+# =========================================================
 
 async def send_ai_response(
     message,
@@ -416,19 +409,20 @@ async def send_ai_response(
 
     try:
 
+        # الرد الحقيقي على رسالة المستخدم
         await message.reply(
             chunks[0],
             mention_author=False
         )
 
         print(
-            "↩️ AI replied to original message."
+            "↩️🔥 AI REPLIED TO ORIGINAL MESSAGE"
         )
 
     except Exception:
 
         print(
-            "❌ Failed to reply to original message:"
+            "❌ Failed to reply:"
         )
 
         traceback.print_exc()
@@ -446,7 +440,7 @@ async def send_ai_response(
         except Exception:
 
             print(
-                "❌ Failed to send additional AI chunk:"
+                "❌ Failed to send extra chunk:"
             )
 
             traceback.print_exc()
@@ -558,7 +552,7 @@ def normalize_text(
 
 
 # =========================================================
-# DIRECT BOT DETECTION
+# DIRECT DETECTION
 # =========================================================
 
 def is_directed_to_bot(
@@ -568,36 +562,40 @@ def is_directed_to_bot(
     if bot.user is None:
         return False
 
-    if bot.user in message.mentions:
+    # Mention
+    if any(
+        user.id == bot.user.id
+        for user in message.mentions
+    ):
         return True
 
-    referenced_message = getattr(
+    # Reply to MyAI
+    reference = getattr(
         message,
         "reference",
         None
     )
 
-    if referenced_message is not None:
+    if reference:
 
         resolved = getattr(
-            referenced_message,
+            reference,
             "resolved",
             None
         )
 
-        if resolved is not None:
+        if resolved:
 
-            resolved_author = getattr(
+            author = getattr(
                 resolved,
                 "author",
                 None
             )
 
             if (
-                resolved_author is not None
-                and resolved_author.id == bot.user.id
+                author
+                and author.id == bot.user.id
             ):
-
                 return True
 
     content = normalize_text(
@@ -607,55 +605,36 @@ def is_directed_to_bot(
     if not content:
         return False
 
-    names = []
-
-    if bot.user.name:
-
-        names.append(
-            normalize_text(
-                bot.user.name
-            )
-        )
-
-    if bot.user.display_name:
-
-        names.append(
-            normalize_text(
-                bot.user.display_name
-            )
-        )
-
-    names.extend([
+    names = {
+        normalize_text(bot.user.name),
+        normalize_text(bot.user.display_name),
         "myai",
         "my ai"
-    ])
+    }
 
-    names = list({
+    names = {
         name
         for name in names
         if name
-    })
+    }
 
     for name in names:
 
-        escaped = re.escape(
-            name
-        )
+        escaped = re.escape(name)
 
         patterns = [
 
             rf"^{escaped}$",
 
-            rf"^{escaped}\s*[:،,]",
-
             rf"^{escaped}\s+",
+
+            rf"^{escaped}\s*[:،,]",
 
             rf"^يا\s+{escaped}\b",
 
             rf"^hey\s+{escaped}\b",
 
             rf"^hello\s+{escaped}\b",
-
         ]
 
         for pattern in patterns:
@@ -665,7 +644,6 @@ def is_directed_to_bot(
                 content,
                 re.IGNORECASE
             ):
-
                 return True
 
     return False
@@ -712,14 +690,13 @@ async def generate_chat_reply(
     if not response:
 
         print(
-            "⚠️ AI returned an empty response."
+            "⚠️ AI returned empty response."
         )
 
         return
 
     print(
-        "✅ AI RESPONSE RECEIVED | "
-        f"length={len(response)}"
+        f"✅ AI RESPONSE RECEIVED | length={len(response)}"
     )
 
     await send_ai_response(
@@ -740,7 +717,7 @@ async def handle_auto_ai(
 
     channel_id = message.channel.id
 
-    current_count = (
+    count = (
         auto_message_counters.get(
             channel_id,
             0
@@ -750,16 +727,15 @@ async def handle_auto_ai(
 
     auto_message_counters[
         channel_id
-    ] = current_count
+    ] = count
 
     print(
         "🤖 AUTO COUNTER | "
         f"channel={channel_id} | "
-        f"count={current_count}/"
-        f"{AUTO_CHECK_MESSAGE_COUNT}"
+        f"count={count}/{AUTO_CHECK_MESSAGE_COUNT}"
     )
 
-    if current_count < AUTO_CHECK_MESSAGE_COUNT:
+    if count < AUTO_CHECK_MESSAGE_COUNT:
         return
 
     auto_message_counters[
@@ -768,23 +744,21 @@ async def handle_auto_ai(
 
     now = time.time()
 
-    last_check = auto_last_check.get(
+    last = auto_last_check.get(
         channel_id,
         0
     )
 
-    elapsed = now - last_check
+    elapsed = now - last
 
     if elapsed < AUTO_COOLDOWN_SECONDS:
 
         remaining = int(
-            AUTO_COOLDOWN_SECONDS
-            - elapsed
+            AUTO_COOLDOWN_SECONDS - elapsed
         )
 
         print(
-            "⏳ AUTO COOLDOWN | "
-            f"remaining={remaining}s"
+            f"⏳ AUTO COOLDOWN | remaining={remaining}s"
         )
 
         return
@@ -800,24 +774,15 @@ async def handle_auto_ai(
     response = await ai.generate_proactive(
         guild_id=message.guild.id,
         channel_id=message.channel.id,
-        character_name=character.get(
-            "name"
-        ),
+        character_name=character.get("name"),
         provider=AI_PROVIDER,
         model=AI_MODEL
     )
 
     if not response:
-
-        print(
-            "⚠️ Proactive AI returned nothing."
-        )
-
         return
 
-    response = str(
-        response
-    ).strip()
+    response = str(response).strip()
 
     if response.upper() == "NO_ALERT":
 
@@ -826,11 +791,6 @@ async def handle_auto_ai(
         )
 
         return
-
-    print(
-        "🚨 Proactive AI alert received | "
-        f"length={len(response)}"
-    )
 
     await send_ai_response(
         message,
@@ -848,24 +808,15 @@ def bot_chat_allowed(
 
     now = time.time()
 
-    last_reply = bot_chat_last_reply.get(
+    last = bot_chat_last_reply.get(
         channel_id,
         0
     )
 
-    elapsed = now - last_reply
-
-    if elapsed < BOT_CHAT_COOLDOWN_SECONDS:
-
-        remaining = int(
-            BOT_CHAT_COOLDOWN_SECONDS
-            - elapsed
-        )
-
-        print(
-            "⏳ BOT CHAT COOLDOWN | "
-            f"remaining={remaining}s"
-        )
+    if (
+        now - last
+        < BOT_CHAT_COOLDOWN_SECONDS
+    ):
 
         return False
 
@@ -875,13 +826,6 @@ def bot_chat_allowed(
     )
 
     if count >= BOT_CHAT_MAX_REPLIES:
-
-        print(
-            "🛑 BOT CHAT LIMIT REACHED | "
-            f"count={count}/"
-            f"{BOT_CHAT_MAX_REPLIES}"
-        )
-
         return False
 
     return True
@@ -897,34 +841,12 @@ def register_bot_chat_reply(
         bot_chat_reply_counts.get(
             channel_id,
             0
-        )
-        + 1
+        ) + 1
     )
 
     bot_chat_last_reply[
         channel_id
     ] = time.time()
-
-    print(
-        "🤖 BOT CHAT REPLY COUNT | "
-        f"channel={channel_id} | "
-        f"count={bot_chat_reply_counts[channel_id]}/"
-        f"{BOT_CHAT_MAX_REPLIES}"
-    )
-
-
-def reset_bot_chat_session(
-    channel_id
-):
-
-    bot_chat_reply_counts[
-        channel_id
-    ] = 0
-
-    bot_chat_last_reply.pop(
-        channel_id,
-        None
-    )
 
 
 # =========================================================
@@ -940,8 +862,7 @@ async def on_ready():
     )
 
     print(
-        f"🌐 Connected to "
-        f"{len(bot.guilds)} server(s)."
+        f"🌐 Connected to {len(bot.guilds)} server(s)."
     )
 
     print(
@@ -949,8 +870,8 @@ async def on_ready():
     )
 
     print(
-        "📡 Message Content Intent:",
-        bot.intents.message_content
+        f"📡 Message Content Intent: "
+        f"{bot.intents.message_content}"
     )
 
     print(
@@ -964,13 +885,11 @@ async def on_ready():
     )
 
     print(
-        "🤖 Active AI Provider | "
-        f"{AI_PROVIDER}"
+        f"🤖 Active AI Provider | {AI_PROVIDER}"
     )
 
     print(
-        "🧠 Active AI Model | "
-        f"{AI_MODEL}"
+        f"🧠 Active AI Model | {AI_MODEL}"
     )
 
 
@@ -983,81 +902,68 @@ async def on_message(
     message: discord.Message
 ):
 
+    # =====================================================
+    # VERY IMPORTANT:
+    # This log MUST show the real sender.
+    # =====================================================
+
     try:
-
-        author_name = str(
-            message.author
-        )
-
-        author_id = getattr(
-            message.author,
-            "id",
-            "unknown"
-        )
-
-        is_bot = getattr(
-            message.author,
-            "bot",
-            False
-        )
-
-        guild_name = (
-            message.guild.name
-            if message.guild
-            else "DM"
-        )
-
-        guild_id = (
-            message.guild.id
-            if message.guild
-            else None
-        )
-
-        channel_name = getattr(
-            message.channel,
-            "name",
-            str(message.channel)
-        )
-
-        channel_id = getattr(
-            message.channel,
-            "id",
-            "unknown"
-        )
-
-        content = (
-            message.content
-            or ""
-        )
 
         print(
             "\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "📩 NEW MESSAGE\n"
-            f"👤 Sender     : {author_name}\n"
-            f"🆔 Sender ID  : {author_id}\n"
-            f"🤖 Is Bot     : {is_bot}\n"
-            f"🏠 Server     : {guild_name}\n"
-            f"🆔 Server ID  : {guild_id}\n"
-            f"💬 Channel    : #{channel_name}\n"
-            f"🆔 Channel ID : {channel_id}\n"
-            f"📝 Message    : {content!r}\n"
+            f"👤 Sender     : {message.author}\n"
+            f"🆔 Sender ID  : {message.author.id}\n"
+            f"🤖 Is Bot     : {message.author.bot}\n"
+            f"🏠 Server     : "
+            f"{message.guild.name if message.guild else 'DM'}\n"
+            f"🆔 Server ID  : "
+            f"{message.guild.id if message.guild else None}\n"
+            f"💬 Channel    : "
+            f"{getattr(message.channel, 'name', message.channel)}\n"
+            f"🆔 Channel ID : {message.channel.id}\n"
+            f"📝 Message    : {message.content!r}\n"
+            f"🏷️ Mentions   : "
+            f"{[f'{u} ({u.id})' for u in message.mentions]}\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         )
 
-    except Exception as e:
+    except Exception:
 
         print(
-            f"⚠️ Message logger error: {e}"
+            "❌ Message logging error:"
         )
+
+        traceback.print_exc()
+
+    # =====================================================
+    # DM
+    # =====================================================
 
     if message.guild is None:
 
         print(
-            "⏭️ Ignored DM message."
+            "⏭️ Ignored DM."
         )
 
         return
+
+    # =====================================================
+    # IGNORE ALL BOT MESSAGES
+    # =====================================================
+
+    if message.author.bot:
+
+        print(
+            "⏭️ Ignored bot message."
+        )
+
+        return
+
+    # =====================================================
+    # LOAD CONFIG
+    # =====================================================
 
     guild_id = message.guild.id
 
@@ -1068,14 +974,20 @@ async def on_message(
     if config is None:
 
         print(
-            f"❌ No AI config "
-            f"for guild {guild_id}"
+            "❌ No AI config."
         )
 
         return
 
     config = row_to_dict(
         config
+    )
+
+    enabled = bool(
+        config.get(
+            "enabled",
+            0
+        )
     )
 
     reply_type = str(
@@ -1085,16 +997,17 @@ async def on_message(
         )
     ).lower().strip()
 
-    if (
-        bot.user is not None
-        and message.author.id == bot.user.id
-    ):
+    print(
+        "⚙️ CONFIG | "
+        f"enabled={enabled} | "
+        f"type={reply_type} | "
+        f"channel={config.get('channel_id')} | "
+        f"character={config.get('character_name')}"
+    )
 
-        print(
-            "⏭️ Ignored MyAI's own message."
-        )
-
-        return
+    # =====================================================
+    # COMMANDS
+    # =====================================================
 
     try:
 
@@ -1110,37 +1023,21 @@ async def on_message(
 
         traceback.print_exc()
 
-    print(
-        f"🏠 Guild detected: {guild_id}"
-    )
+    # =====================================================
+    # DISABLED
+    # =====================================================
 
-    print(
-        "⚙️ Config loaded | "
-        f"enabled={config.get('enabled')} | "
-        f"reply_type={reply_type} | "
-        f"channel_id={config.get('channel_id')} | "
-        f"character={config.get('character_name')} | "
-        f"provider={AI_PROVIDER} | "
-        f"model={AI_MODEL} | "
-        f"mode={config.get('mode', 'normal')}"
-    )
-
-    if not bool(
-        config.get(
-            "enabled",
-            0
-        )
-    ):
+    if not enabled:
 
         print(
-            "⏭️ AI is disabled."
+            "⏭️ AI disabled."
         )
 
         return
 
-    print(
-        "🟢 AI is enabled."
-    )
+    # =====================================================
+    # CHARACTER
+    # =====================================================
 
     character = get_active_character(
         guild_id,
@@ -1150,32 +1047,25 @@ async def on_message(
     if character is None:
 
         print(
-            f"❌ No AI character "
-            f"for guild {guild_id}"
+            "❌ No character."
         )
 
         return
 
     print(
-        "🧠 Character loaded: "
+        f"🧠 Character loaded: "
         f"{character.get('name')}"
     )
 
-    print(
-        f"🎯 Reply type: {reply_type}"
-    )
-
-    is_bot_message = getattr(
-        message.author,
-        "bot",
-        False
-    )
-
     # =====================================================
-    # 1. MENTION
+    # MENTION
     # =====================================================
 
     if reply_type == "mention":
+
+        print(
+            "🎯 MODE = MENTION"
+        )
 
         if bot.user is None:
 
@@ -1185,22 +1075,155 @@ async def on_message(
 
             return
 
-        if bot.user not in message.mentions:
+        mentioned = any(
+            user.id == bot.user.id
+            for user in message.mentions
+        )
+
+        print(
+            f"🔎 MyAI mentioned = {mentioned}"
+        )
+
+        if not mentioned:
 
             print(
-                "⏭️ Message does not "
-                "mention MyAI."
+                "⏭️ MyAI was not mentioned."
             )
 
             return
 
         print(
-            "🏷️ MyAI mention detected."
+            "🏷️🔥 MYAI MENTION DETECTED!"
         )
 
         user_message = clean_bot_mention(
             message.content
         )
+
+        if not user_message:
+
+            user_message = "السلام عليكم"
+
+        print(
+            f"💬 User message = {user_message!r}"
+        )
+
+        try:
+
+            await generate_chat_reply(
+                message,
+                config,
+                character,
+                user_message
+            )
+
+            print(
+                "✅🔥 MENTION RESPONSE SENT!"
+            )
+
+        except Exception:
+
+            print(
+                "❌ Mention AI error:"
+            )
+
+            traceback.print_exc()
+
+        return
+
+    # =====================================================
+    # CHANNEL
+    # =====================================================
+
+    if reply_type == "channel":
+
+        print(
+            "📢 MODE = CHANNEL"
+        )
+
+        configured_channel = normalize_channel_id(
+            config.get("channel_id")
+        )
+
+        if configured_channel is None:
+
+            print(
+                "❌ No configured channel."
+            )
+
+            return
+
+        if not channel_matches(
+            message,
+            configured_channel
+        ):
+
+            print(
+                "⏭️ Outside AI channel."
+            )
+
+            return
+
+        content = (
+            message.content or ""
+        ).strip()
+
+        if not content:
+
+            return
+
+        try:
+
+            await generate_chat_reply(
+                message,
+                config,
+                character,
+                content
+            )
+
+            print(
+                "✅📢 CHANNEL RESPONSE SENT!"
+            )
+
+        except Exception:
+
+            print(
+                "❌ Channel AI error:"
+            )
+
+            traceback.print_exc()
+
+        return
+
+    # =====================================================
+    # DIRECT
+    # =====================================================
+
+    if reply_type == "direct":
+
+        print(
+            "🎯 MODE = DIRECT"
+        )
+
+        if not is_directed_to_bot(
+            message
+        ):
+
+            print(
+                "⏭️ Message not directed to MyAI."
+            )
+
+            return
+
+        user_message = clean_bot_mention(
+            message.content
+        )
+
+        if not user_message:
+
+            user_message = (
+                message.content or ""
+            ).strip()
 
         if not user_message:
 
@@ -1215,15 +1238,10 @@ async def on_message(
                 user_message
             )
 
-            print(
-                "✅ Mention AI response sent."
-            )
-
         except Exception:
 
             print(
-                f"❌ Mention AI error "
-                f"in guild {guild_id}:"
+                "❌ Direct AI error:"
             )
 
             traceback.print_exc()
@@ -1231,173 +1249,13 @@ async def on_message(
         return
 
     # =====================================================
-    # 2. CHANNEL
-    # =====================================================
-
-    if reply_type == "channel":
-
-        configured_channel = config.get(
-            "channel_id"
-        )
-
-        print(
-            "🔎 CHANNEL MODE | "
-            f"message_channel={message.channel.id} | "
-            f"saved_channel={configured_channel!r} | "
-            f"is_bot={is_bot_message}"
-        )
-
-        if configured_channel is None:
-
-            print(
-                "❌ Channel mode selected "
-                "but no channel configured."
-            )
-
-            return
-
-        configured_channel = normalize_channel_id(
-            configured_channel
-        )
-
-        if configured_channel is None:
-
-            print(
-                "❌ Invalid saved channel_id."
-            )
-
-            return
-
-        if not channel_matches(
-            message,
-            configured_channel
-        ):
-
-            print(
-                "⏭️ Message is outside "
-                "the configured channel."
-            )
-
-            return
-
-        content = message.content.strip()
-
-        if not content:
-
-            print(
-                "⏭️ Empty message."
-            )
-
-            return
-
-        try:
-
-            await generate_chat_reply(
-                message,
-                config,
-                character,
-                content
-            )
-
-            print(
-                "✅ Channel AI response sent."
-            )
-
-        except Exception:
-
-            print(
-                f"❌ Channel AI error "
-                f"in guild {guild_id}:"
-            )
-
-            traceback.print_exc()
-
-        return
-
-    # =====================================================
-    # 3. DIRECT
-    # =====================================================
-
-    if reply_type == "direct":
-
-        directed = is_directed_to_bot(
-            message
-        )
-
-        print(
-            f"🎯 Direct detection: "
-            f"{directed} | "
-            f"is_bot={is_bot_message}"
-        )
-
-        if not directed:
-
-            print(
-                "⏭️ Message is not directed "
-                "to MyAI."
-            )
-
-            return
-
-        user_message = clean_bot_mention(
-            message.content
-        )
-
-        if not user_message:
-
-            user_message = (
-                message.content.strip()
-            )
-
-        if not user_message:
-
-            print(
-                "⏭️ Empty direct message."
-            )
-
-            return
-
-        try:
-
-            await generate_chat_reply(
-                message,
-                config,
-                character,
-                user_message
-            )
-
-            print(
-                "✅ Direct AI response sent."
-            )
-
-        except Exception:
-
-            print(
-                f"❌ Direct AI error "
-                f"in guild {guild_id}:"
-            )
-
-            traceback.print_exc()
-
-        return
-
-    # =====================================================
-    # 4. AUTO
+    # AUTO
     # =====================================================
 
     if reply_type == "auto":
 
-        if is_bot_message:
-
-            print(
-                "⏭️ AUTO MODE | "
-                "other bot ignored."
-            )
-
-            return
-
         print(
-            "🤖 Auto mode message detected."
+            "🤖 MODE = AUTO"
         )
 
         try:
@@ -1408,15 +1266,10 @@ async def on_message(
                 character
             )
 
-            print(
-                "✅ Auto handler completed."
-            )
-
         except Exception:
 
             print(
-                f"❌ Auto handler error "
-                f"in guild {guild_id}:"
+                "❌ Auto AI error:"
             )
 
             traceback.print_exc()
@@ -1424,83 +1277,36 @@ async def on_message(
         return
 
     # =====================================================
-    # 5. BOT CHAT
+    # BOT CHAT
     # =====================================================
 
     if reply_type == "bot_chat":
 
-        if is_bot_message:
+        print(
+            "🤖 MODE = BOT CHAT"
+        )
+
+        # MyAI ignores its own messages because
+        # they are already handled above.
+
+        if not bot_chat_allowed(
+            message.channel.id
+        ):
 
             print(
-                "🤖 BOT CHAT | "
-                "OTHER BOT MESSAGE ALLOWED"
+                "⏭️ Bot Chat safety blocked."
             )
 
-            if not bot_chat_allowed(
-                message.channel.id
-            ):
-
-                return
-
-            user_message = (
-                message.content
-                or ""
-            ).strip()
-
-            if not user_message:
-
-                print(
-                    "⏭️ Other bot message is empty."
-                )
-
-                return
-
-            try:
-
-                await generate_chat_reply(
-                    message,
-                    config,
-                    character,
-                    user_message
-                )
-
-                register_bot_chat_reply(
-                    message.channel.id
-                )
-
-                print(
-                    "✅ MyAI replied to another bot."
-                )
-
-            except Exception:
-
-                print(
-                    "❌ Bot-to-Bot AI error:"
-                )
-
-                traceback.print_exc()
-
             return
-
-        print(
-            "👤 BOT CHAT | "
-            "HUMAN MESSAGE"
-        )
 
         directed = is_directed_to_bot(
             message
         )
 
-        print(
-            f"🎯 Bot Chat human detection: "
-            f"{directed}"
-        )
-
         if not directed:
 
             print(
-                "⏭️ Human message is not "
-                "directed to MyAI."
+                "⏭️ Message not directed to MyAI."
             )
 
             return
@@ -1512,16 +1318,12 @@ async def on_message(
         if not user_message:
 
             user_message = (
-                message.content.strip()
-            )
+                message.content or ""
+            ).strip()
 
         if not user_message:
 
-            print(
-                "⏭️ Empty Bot Chat human message."
-            )
-
-            return
+            user_message = "السلام عليكم"
 
         try:
 
@@ -1532,15 +1334,18 @@ async def on_message(
                 user_message
             )
 
+            register_bot_chat_reply(
+                message.channel.id
+            )
+
             print(
-                "✅ Bot Chat human response sent."
+                "✅🤖 BOT CHAT RESPONSE SENT!"
             )
 
         except Exception:
 
             print(
-                f"❌ Bot Chat human AI error "
-                f"in guild {guild_id}:"
+                "❌ Bot Chat AI error:"
             )
 
             traceback.print_exc()
@@ -1548,8 +1353,7 @@ async def on_message(
         return
 
     print(
-        "⚠️ Unknown reply_type: "
-        f"{reply_type!r}"
+        f"⚠️ Unknown reply type: {reply_type!r}"
     )
 
 
@@ -1605,38 +1409,22 @@ async def ai_command(
     if character is None:
 
         await interaction.followup.send(
-            "❌ لا توجد شخصية AI لهذا السيرفر."
+            "❌ لا توجد شخصية AI."
         )
 
         return
 
     try:
 
-        character_name = character.get(
-            "name"
-        )
-
-        provider = AI_PROVIDER
-        model = AI_MODEL
-        mode = get_ai_mode(config)
-
-        print(
-            "🧠 /ai REQUEST | "
-            f"character={character_name} | "
-            f"provider={provider} | "
-            f"model={model} | "
-            f"mode={mode}"
-        )
-
         response = await ai.generate(
             guild_id=guild_id,
             channel_id=interaction.channel.id,
             user_id=interaction.user.id,
-            character_name=character_name,
+            character_name=character.get("name"),
             user_message=message,
-            provider=provider,
-            model=model,
-            mode=mode
+            provider=AI_PROVIDER,
+            model=AI_MODEL,
+            mode=get_ai_mode(config)
         )
 
         if not response:
@@ -1647,17 +1435,13 @@ async def ai_command(
 
             return
 
-        chunks = split_message(
-            response
-        )
-
-        for chunk in chunks:
+        for chunk in split_message(response):
 
             await interaction.followup.send(
                 chunk
             )
 
-    except Exception as error:
+    except Exception:
 
         print(
             "❌ /ai error:"
@@ -1665,41 +1449,13 @@ async def ai_command(
 
         traceback.print_exc()
 
-        error_text = str(
-            error
-        ).lower()
-
-        if (
-            "quota" in error_text
-            or "credit_balance_exhausted" in error_text
-            or "insufficient_quota" in error_text
-        ):
-
-            await interaction.followup.send(
-                "⚠️ رصيد مزود الذكاء الاصطناعي غير متاح حاليًا."
-            )
-
-            return
-
-        if (
-            "gemini_api_key" in error_text
-            or "google_api_key" in error_text
-            or "not configured" in error_text
-        ):
-
-            await interaction.followup.send(
-                "⚠️ مفتاح Gemini API غير مضبوط في إعدادات الاستضافة."
-            )
-
-            return
-
         await interaction.followup.send(
             "❌ حدث خطأ أثناء تشغيل الذكاء الاصطناعي."
         )
 
 
 # =========================================================
-# SETUP CHANNEL SELECT
+# SETUP CHANNEL
 # =========================================================
 
 class SetupChannelSelect(
@@ -1725,7 +1481,7 @@ class SetupChannelSelect(
         if not interaction.guild:
 
             await interaction.response.send_message(
-                "❌ هذا الخيار داخل السيرفر فقط.",
+                "❌ داخل السيرفر فقط.",
                 ephemeral=True
             )
 
@@ -1736,7 +1492,7 @@ class SetupChannelSelect(
         ):
 
             await interaction.response.send_message(
-                "❌ ما عندك صلاحية إدارة الذكاء الاصطناعي.",
+                "❌ ما عندك صلاحية.",
                 ephemeral=True
             )
 
@@ -1744,31 +1500,23 @@ class SetupChannelSelect(
 
         channel = self.values[0]
 
-        channel_id = normalize_channel_id(
-            channel.id
-        )
-
         save_config(
             interaction.guild.id,
-            channel_id=channel_id,
+            channel_id=normalize_channel_id(
+                channel.id
+            ),
             enabled=True
-        )
-
-        print(
-            "💾 CHANNEL SAVED | "
-            f"guild={interaction.guild.id} | "
-            f"channel={channel_id}"
         )
 
         await interaction.response.send_message(
             f"✅ تم اختيار الروم: {channel.mention}\n"
-            f"🟢 تم تفعيل نظام الذكاء الاصطناعي.",
+            "🟢 تم تفعيل نظام الذكاء الاصطناعي.",
             ephemeral=True
         )
 
 
 # =========================================================
-# SETUP REPLY TYPE SELECT
+# SETUP REPLY TYPE
 # =========================================================
 
 class SetupReplyTypeSelect(
@@ -1787,33 +1535,32 @@ class SetupReplyTypeSelect(
             discord.SelectOption(
                 label="1 - Mention",
                 value="mention",
-                description="يرد عندما يتم منشن البوت"
+                description="يرد عند منشن MyAI"
             ),
 
             discord.SelectOption(
                 label="2 - Channel",
                 value="channel",
-                description="يرد على كل رسالة في روم محدد"
+                description="يرد على كل رسالة في الروم المحدد"
             ),
 
             discord.SelectOption(
                 label="3 - Direct",
                 value="direct",
-                description="يرد عندما يتم توجيه الكلام إليه"
+                description="يرد عندما يكون الكلام موجهًا إليه"
             ),
 
             discord.SelectOption(
                 label="4 - Auto",
                 value="auto",
-                description="يراقب المحادثة ويرسل تنبيهات ذكية"
+                description="يتابع المحادثة ويرسل ردودًا استباقية"
             ),
 
             discord.SelectOption(
-                label="5 - التحدث مع البوتات الأخرى",
+                label="5 - Bot Chat",
                 value="bot_chat",
-                description="يتحدث MyAI مع البوتات الأخرى 🤖"
+                description="نظام محادثة MyAI مع البوتات"
             ),
-
         ]
 
         super().__init__(
@@ -1831,7 +1578,7 @@ class SetupReplyTypeSelect(
         ):
 
             await interaction.response.send_message(
-                "❌ ما عندك صلاحية إدارة الذكاء الاصطناعي.",
+                "❌ ما عندك صلاحية.",
                 ephemeral=True
             )
 
@@ -1845,27 +1592,17 @@ class SetupReplyTypeSelect(
             enabled=True
         )
 
-        print(
-            "💾 REPLY TYPE SAVED | "
-            f"guild={self.guild_id} | "
-            f"type={value}"
-        )
-
         names = {
             "mention": "Mention",
             "channel": "Channel",
             "direct": "Direct",
             "auto": "Auto",
-            "bot_chat": "التحدث مع البوتات الأخرى 🤖"
+            "bot_chat": "Bot Chat"
         }
 
-        display_name = names.get(
-            value,
-            value
-        )
-
         await interaction.response.send_message(
-            f"✅ تم تفعيل نظام الرد: `{display_name}`",
+            f"✅ تم تفعيل نظام الرد: "
+            f"`{names.get(value, value)}`",
             ephemeral=True
         )
 
@@ -1914,7 +1651,7 @@ class SetupView(
         ):
 
             await interaction.response.send_message(
-                "❌ ما عندك صلاحية إدارة الذكاء الاصطناعي.",
+                "❌ ما عندك صلاحية.",
                 ephemeral=True
             )
 
@@ -1945,7 +1682,7 @@ class SetupView(
         ):
 
             await interaction.response.send_message(
-                "❌ ما عندك صلاحية إدارة الذكاء الاصطناعي.",
+                "❌ ما عندك صلاحية.",
                 ephemeral=True
             )
 
@@ -1977,7 +1714,7 @@ async def ai_setup(
     if interaction.guild is None:
 
         await interaction.response.send_message(
-            "❌ هذا الأمر داخل السيرفر فقط.",
+            "❌ داخل السيرفر فقط.",
             ephemeral=True
         )
 
@@ -1988,7 +1725,7 @@ async def ai_setup(
     ):
 
         await interaction.response.send_message(
-            "❌ ما عندك صلاحية استخدام إعدادات الذكاء الاصطناعي.",
+            "❌ ما عندك صلاحية.",
             ephemeral=True
         )
 
@@ -2023,14 +1760,14 @@ async def ai_setup(
         "channel": "2 - Channel",
         "direct": "3 - Direct",
         "auto": "4 - Auto",
-        "bot_chat": "5 - التحدث مع البوتات الأخرى 🤖"
+        "bot_chat": "5 - Bot Chat"
     }
 
     embed = discord.Embed(
         title="🤖 إعداد MyAI",
         description=(
             "اختر الروم ونوع الرد.\n\n"
-            "اختيار نوع الرد يقوم بتفعيله مباشرة."
+            "اختيار نوع الرد يفعّله مباشرة."
         ),
         color=discord.Color.blurple()
     )
@@ -2039,12 +1776,7 @@ async def ai_setup(
         name="الحالة",
         value=(
             "🟢 مفعّل"
-            if bool(
-                config.get(
-                    "enabled",
-                    0
-                )
-            )
+            if bool(config.get("enabled", 0))
             else "🔴 معطّل"
         ),
         inline=True
@@ -2071,9 +1803,7 @@ async def ai_setup(
     )
 
     channel_id = normalize_channel_id(
-        config.get(
-            "channel_id"
-        )
+        config.get("channel_id")
     )
 
     embed.add_field(
@@ -2113,7 +1843,7 @@ async def ai_setup(
 
 
 # =========================================================
-# /CHARACTER CREATE
+# CHARACTER CREATE
 # =========================================================
 
 @bot.tree.command(
@@ -2144,7 +1874,7 @@ async def character_create(
     ):
 
         await interaction.response.send_message(
-            "❌ ما عندك صلاحية إنشاء الشخصيات.",
+            "❌ ما عندك صلاحية.",
             ephemeral=True
         )
 
@@ -2177,7 +1907,7 @@ async def character_create(
 
 
 # =========================================================
-# /CHARACTER LIST
+# CHARACTER LIST
 # =========================================================
 
 @bot.tree.command(
@@ -2249,7 +1979,7 @@ async def character_list(
 
 
 # =========================================================
-# /CHARACTER USE
+# CHARACTER USE
 # =========================================================
 
 @bot.tree.command(
@@ -2278,7 +2008,7 @@ async def character_use(
     ):
 
         await interaction.response.send_message(
-            "❌ ما عندك صلاحية تغيير الشخصية.",
+            "❌ ما عندك صلاحية.",
             ephemeral=True
         )
 
@@ -2300,19 +2030,17 @@ async def character_use(
 
     save_config(
         interaction.guild.id,
-        character_name=character.get(
-            "name"
-        )
+        character_name=character.get("name")
     )
 
     await interaction.response.send_message(
-        "🧠 تم اختيار الشخصية "
+        f"🧠 تم اختيار الشخصية "
         f"**{character.get('name')}**."
     )
 
 
 # =========================================================
-# /AI STATUS
+# AI STATUS
 # =========================================================
 
 @bot.tree.command(
@@ -2326,7 +2054,7 @@ async def ai_status(
     if interaction.guild is None:
 
         await interaction.response.send_message(
-            "❌ هذا الأمر داخل السيرفر فقط.",
+            "❌ داخل السيرفر فقط.",
             ephemeral=True
         )
 
@@ -2369,14 +2097,6 @@ async def ai_status(
         )
     )
 
-    reply_names = {
-        "mention": "1 - Mention",
-        "channel": "2 - Channel",
-        "direct": "3 - Direct",
-        "auto": "4 - Auto",
-        "bot_chat": "5 - التحدث مع البوتات الأخرى 🤖"
-    }
-
     embed = discord.Embed(
         title="🤖 حالة MyAI",
         color=(
@@ -2398,10 +2118,7 @@ async def ai_status(
 
     embed.add_field(
         name="نوع الرد",
-        value=reply_names.get(
-            reply_type,
-            reply_type
-        ),
+        value=reply_type,
         inline=True
     )
 
@@ -2450,7 +2167,7 @@ async def ai_status(
 
 
 # =========================================================
-# /AI MEMORY CLEAR
+# AI MEMORY CLEAR
 # =========================================================
 
 @bot.tree.command(
@@ -2464,7 +2181,7 @@ async def ai_memory_clear(
     if interaction.guild is None:
 
         await interaction.response.send_message(
-            "❌ هذا الأمر داخل السيرفر فقط.",
+            "❌ داخل السيرفر فقط.",
             ephemeral=True
         )
 
@@ -2475,7 +2192,7 @@ async def ai_memory_clear(
     ):
 
         await interaction.response.send_message(
-            "❌ ما عندك صلاحية مسح الذاكرة.",
+            "❌ ما عندك صلاحية.",
             ephemeral=True
         )
 
@@ -2489,7 +2206,7 @@ async def ai_memory_clear(
         )
 
         await interaction.response.send_message(
-            "🧹 تم مسح ذاكرة محادثة هذا الروم."
+            "🧹 تم مسح ذاكرة المحادثة."
         )
 
     except Exception:
@@ -2507,7 +2224,7 @@ async def ai_memory_clear(
 
 
 # =========================================================
-# START BOT
+# START
 # =========================================================
 
 if not TOKEN:
