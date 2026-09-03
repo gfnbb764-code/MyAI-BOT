@@ -13,6 +13,7 @@ from discord import app_commands
 
 from database import Database
 from ai_engine import AIEngine
+from ai_group import AIGroupManager
 
 
 # ============================================================
@@ -186,6 +187,9 @@ AI_SEMAPHORE = asyncio.Semaphore(
 )
 
 ACTIVE_REQUESTS = set()
+
+# يتم تهيئته داخل setup_hook
+ai_group = None
 
 
 # ============================================================
@@ -552,10 +556,6 @@ def get_active_character_for_user(
     guild_id: int,
     user_id: int
 ):
-    # --------------------------------------------------------
-    # 1. شخصية المستخدم الخاصة
-    # --------------------------------------------------------
-
     try:
         character = db.get_user_active_character(
             guild_id,
@@ -567,10 +567,6 @@ def get_active_character_for_user(
 
     except Exception:
         traceback.print_exc()
-
-    # --------------------------------------------------------
-    # 2. شخصية السيرفر الافتراضية
-    # --------------------------------------------------------
 
     try:
         character = db.get_active_character(
@@ -634,10 +630,6 @@ def clean_mentions(
 async def get_referenced_message(
     message: discord.Message
 ):
-    """
-    الحصول على الرسالة التي قام المستخدم
-    بالرد عليها.
-    """
 
     reference = message.reference
 
@@ -680,19 +672,8 @@ async def build_message_context(
     message: discord.Message,
     prompt: str
 ):
-    """
-    بناء سياق إضافي للذكاء الاصطناعي:
-    - المرسل الحالي
-    - المستخدمون المذكورون
-    - الرسالة التي تم الرد عليها
-    - صاحب الرسالة المشار إليها
-    """
 
     context_parts = []
-
-    # --------------------------------------------------------
-    # CURRENT SENDER
-    # --------------------------------------------------------
 
     sender_name = (
         getattr(
@@ -710,10 +691,6 @@ async def build_message_context(
     context_parts.append(
         f"المرسل الحالي: {sender_name}"
     )
-
-    # --------------------------------------------------------
-    # MENTIONS
-    # --------------------------------------------------------
 
     mentioned_users = []
 
@@ -750,10 +727,6 @@ async def build_message_context(
                 mentioned_users
             )
         )
-
-    # --------------------------------------------------------
-    # REPLIED MESSAGE
-    # --------------------------------------------------------
 
     referenced_message = (
         await get_referenced_message(
@@ -794,10 +767,6 @@ async def build_message_context(
             f"صاحب الرسالة: {referenced_author}",
             f"محتوى الرسالة: {referenced_content}",
         ])
-
-    # --------------------------------------------------------
-    # CONTEXT RULES
-    # --------------------------------------------------------
 
     context_parts.extend([
         "",
@@ -888,6 +857,7 @@ def normalize_channel_id(
 
     try:
         return int(value)
+
     except Exception:
         return None
 
@@ -1352,10 +1322,6 @@ async def generate_chat_reply(
             "رد على المستخدم بشكل طبيعي."
         )
 
-    # --------------------------------------------------------
-    # إضافة سياق الـReply والـMentions
-    # --------------------------------------------------------
-
     prompt_with_context = (
         await build_message_context(
             message,
@@ -1414,22 +1380,34 @@ async def generate_chat_reply(
             )
 
             result = await asyncio.wait_for(
+
                 ai.generate(
+
                     guild_id=guild.id,
+
                     channel_id=message.channel.id,
+
                     user_id=message.author.id,
+
                     prompt=prompt_with_context,
+
                     character=character,
+
                     mode=mode,
+
                     provider=provider,
+
                     model=model,
+
                     history_limit=(
                         history_limit
                         if memory_enabled
                         else 0
                     ),
+
                     max_tokens_override=response_length,
                 ),
+
                 timeout=timeout
             )
 
@@ -1457,6 +1435,152 @@ async def generate_chat_reply(
 
 
 # ============================================================
+# AI GROUP GENERATION BRIDGE
+# ============================================================
+
+async def ai_group_generate(
+    guild_id: int,
+    slot: int,
+    user_id: int,
+    channel_id: int,
+    prompt: str,
+    bot_name: str,
+    personality: str,
+    speaking_style: str,
+    power: int,
+):
+    """
+    AI Group uses the SAME Provider + Model as MyAI.
+
+    The five Discord bot accounts are only different
+    Discord identities. The AI configuration remains
+    centralized in MyAI.
+    """
+
+    config = get_config(
+        guild_id
+    )
+
+    advanced = get_advanced(
+        guild_id
+    )
+
+    provider = config.get(
+        "provider",
+        PRIMARY_AI_PROVIDER
+    )
+
+    model = config.get(
+        "model",
+        GOOGLE_MODEL
+    )
+
+    # شخصية مؤقتة خاصة بالعضو الحالي في المجموعة.
+    character = {
+
+        "name": bot_name,
+
+        "description": (
+            f"عضو رقم {slot} في مجموعة MyAI."
+        ),
+
+        "personality": personality,
+
+        "speaking_style": speaking_style,
+
+        "custom_instructions": (
+            f"أنت العضو رقم {slot} في مجموعة AI. "
+            f"قوة شخصيتك الحالية {power}/100. "
+            "لا تدّعي أنك البوت الرئيسي."
+        ),
+
+        "system_prompt": "",
+
+        "character_type": "normal",
+
+        "provider": provider,
+
+        "model": model,
+    }
+
+    memory_enabled = bool(
+        advanced.get(
+            "memory_enabled",
+            True
+        )
+    )
+
+    history_limit = (
+
+        int(
+            advanced.get(
+                "history_limit",
+                20
+            )
+        )
+
+        if memory_enabled
+
+        else 0
+    )
+
+    response_length = int(
+        advanced.get(
+            "response_length",
+            1200
+        )
+    )
+
+    timeout = int(
+        advanced.get(
+            "timeout",
+            DEFAULT_AI_TIMEOUT
+        )
+    )
+
+    mode = config.get(
+        "mode",
+        "normal"
+    )
+
+    async with AI_SEMAPHORE:
+
+        result = await asyncio.wait_for(
+
+            ai.generate(
+
+                guild_id=guild_id,
+
+                channel_id=channel_id,
+
+                user_id=user_id,
+
+                prompt=prompt,
+
+                character=character,
+
+                mode=mode,
+
+                # مركزي:
+                provider=provider,
+
+                # مركزي:
+                model=model,
+
+                history_limit=history_limit,
+
+                max_tokens_override=response_length,
+            ),
+
+            timeout=timeout
+        )
+
+        return str(
+            result or ""
+        ).strip()
+
+
+# ============================================================
 # DM AI
 # ============================================================
 
@@ -1470,18 +1594,30 @@ async def generate_dm_reply(
         async with AI_SEMAPHORE:
 
             result = await asyncio.wait_for(
+
                 ai.generate(
+
                     guild_id=0,
+
                     channel_id=0,
+
                     user_id=user_id,
+
                     prompt=prompt,
+
                     character=None,
+
                     provider=PRIMARY_AI_PROVIDER,
+
                     model=GOOGLE_MODEL,
+
                     mode="normal",
+
                     history_limit=20,
+
                     max_tokens_override=1200,
                 ),
+
                 timeout=DEFAULT_AI_TIMEOUT
             )
 
@@ -1569,7 +1705,6 @@ async def send_ai_response(
     if not chunks:
         return
 
-    # أول جزء = Reply للرسالة التي كلمت البوت
     await message.reply(
         chunks[0],
         mention_author=False,
@@ -1578,7 +1713,6 @@ async def send_ai_response(
         )
     )
 
-    # بقية أجزاء الرد تبقى مرتبطة بالرسالة الأصلية
     for chunk in chunks[1:]:
 
         await message.channel.send(
@@ -1622,10 +1756,15 @@ async def generate_with_typing_message(
     try:
 
         placeholder = await message.reply(
+
             f"# {character_name}\n\n"
+
             "-------------------------------\n"
+
             f"**{character_name}** يكتب...",
+
             mention_author=False,
+
             allowed_mentions=(
                 discord.AllowedMentions.none()
             )
@@ -1671,7 +1810,6 @@ async def generate_with_typing_message(
 
             return
 
-        # تحويل "يكتب..." إلى الرد النهائي
         await placeholder.edit(
             content=chunks[0]
         )
@@ -1679,9 +1817,13 @@ async def generate_with_typing_message(
         for chunk in chunks[1:]:
 
             await message.channel.send(
+
                 chunk,
+
                 reference=message,
+
                 mention_author=False,
+
                 allowed_mentions=(
                     discord.AllowedMentions.none()
                 )
@@ -1692,11 +1834,9 @@ async def generate_with_typing_message(
         if placeholder:
 
             try:
-
                 await placeholder.delete()
 
             except Exception:
-
                 pass
 
         raise
@@ -2690,8 +2830,7 @@ class TextSettingsModal(
         max_length=4
     )
 
-    # مهم:
-    # لا نستخدم اسم timeout لأنه محجوز داخليًا في Modal
+    # لا نستخدم اسم timeout لأنه محجوز داخل Modal
     ai_timeout = discord.ui.TextInput(
         label="مهلة AI بالثواني",
         placeholder="10 - 180",
@@ -3024,8 +3163,8 @@ class AISettingsView(
     )
     async def ai_toggle(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         config = get_config(
@@ -3053,8 +3192,8 @@ class AISettingsView(
     )
     async def reply_settings(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         await interaction.response.edit_message(
@@ -3073,8 +3212,8 @@ class AISettingsView(
     )
     async def character_settings(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         characters = get_all_characters(
@@ -3107,8 +3246,8 @@ class AISettingsView(
     )
     async def mode_settings(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         await interaction.response.edit_message(
@@ -3127,8 +3266,8 @@ class AISettingsView(
     )
     async def memory_toggle(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         settings = get_advanced(
@@ -3156,8 +3295,8 @@ class AISettingsView(
     )
     async def advanced(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         await interaction.response.send_modal(
@@ -3174,8 +3313,8 @@ class AISettingsView(
     )
     async def security(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         settings = get_advanced(
@@ -3203,8 +3342,8 @@ class AISettingsView(
     )
     async def bot_chat(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         settings = get_advanced(
@@ -3232,8 +3371,8 @@ class AISettingsView(
     )
     async def allow_deny(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         await interaction.response.send_modal(
@@ -3250,8 +3389,8 @@ class AISettingsView(
     )
     async def channel(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         await interaction.response.edit_message(
@@ -3270,8 +3409,8 @@ class AISettingsView(
     )
     async def clear_memory(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         try:
@@ -3302,8 +3441,8 @@ class AISettingsView(
     )
     async def reset(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         reset_advanced(
@@ -3322,8 +3461,8 @@ class AISettingsView(
     )
     async def refresh_button(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         await self.refresh(
@@ -3986,7 +4125,6 @@ async def character_create(
 
         return
 
-    # النوع الداخلي دائمًا normal
     selected_character_type = "normal"
 
     try:
@@ -3996,7 +4134,7 @@ async def character_create(
             name=name,
             character_type=selected_character_type,
             created_by=interaction.user.id,
-            provider="google",
+            provider=PRIMARY_AI_PROVIDER,
             model=GOOGLE_MODEL
         )
 
@@ -4018,7 +4156,7 @@ async def character_create(
                 name,
                 character_type=selected_character_type,
                 created_by=interaction.user.id,
-                provider="google",
+                provider=PRIMARY_AI_PROVIDER,
                 model=GOOGLE_MODEL
             )
 
@@ -4101,10 +4239,6 @@ async def character_use(
             interaction.user.id
         )
     )
-
-    # --------------------------------------------------------
-    # إضافة الشخصية الافتراضية للسيرفر
-    # --------------------------------------------------------
 
     try:
 
@@ -4317,7 +4451,10 @@ async def character_list(
     )
 
     if len(text) > 1900:
-        text = text[:1890] + "\n..."
+
+        text = text[
+            :1890
+        ] + "\n..."
 
     await interaction.response.send_message(
         text,
@@ -4514,6 +4651,38 @@ async def on_message(
         return
 
     # --------------------------------------------------------
+    # AI GROUP
+    # --------------------------------------------------------
+    #
+    # المجموعة تبدأ فقط من رسائل البشر.
+    # رسائل البوتات الثانوية لا تعيد تشغيل المجموعة.
+    # --------------------------------------------------------
+
+    if (
+        ai_group is not None
+        and message.guild is not None
+        and not message.author.bot
+    ):
+
+        try:
+
+            consumed = await ai_group.handle_message(
+                message
+            )
+
+            if consumed:
+
+                await bot.process_commands(
+                    message
+                )
+
+                return
+
+        except Exception:
+
+            traceback.print_exc()
+
+    # --------------------------------------------------------
     # DIRECT MESSAGES
     # --------------------------------------------------------
 
@@ -4601,7 +4770,7 @@ async def on_message(
     )
 
     # --------------------------------------------------------
-    # SAVE MESSAGE WITH ACTUAL USER CHARACTER
+    # SAVE MESSAGE
     # --------------------------------------------------------
 
     try:
@@ -4885,7 +5054,11 @@ async def on_message(
 async def on_ready():
 
     print("=" * 60)
-    print("MyAI BOT — ONLINE")
+
+    print(
+        "MyAI BOT — ONLINE"
+    )
+
     print("=" * 60)
 
     print(
@@ -4903,6 +5076,17 @@ async def on_ready():
     print(
         f"Servers: {len(bot.guilds)}"
     )
+
+    if ai_group is not None:
+
+        print(
+            (
+                "[AI_GROUP] "
+                f"{ai_group.ready_count()}/"
+                f"{ai_group.configured_count()} "
+                "secondary bots online"
+            )
+        )
 
     print("=" * 60)
 
@@ -4945,12 +5129,49 @@ async def on_app_command_error(
 @bot.event
 async def setup_hook():
 
+    global ai_group
+
     try:
+
+        # ----------------------------------------------------
+        # إنشاء مدير AI Group
+        # ----------------------------------------------------
+
+        ai_group = AIGroupManager(
+            main_bot=bot,
+            db_path=db.path,
+            ai_generate=ai_group_generate,
+        )
+
+        # ----------------------------------------------------
+        # تشغيل البوتات الثانوية الموجودة في Secrets
+        # ----------------------------------------------------
+
+        await ai_group.start_clients()
+
+        # ----------------------------------------------------
+        # تسجيل /ai_group
+        # ----------------------------------------------------
+
+        await ai_group.register_command(
+            bot.tree
+        )
+
+        # ----------------------------------------------------
+        # Sync commands
+        # ----------------------------------------------------
 
         synced = await bot.tree.sync()
 
         print(
             f"[commands] synced {len(synced)} commands"
+        )
+
+        print(
+            (
+                "[AI_GROUP] "
+                f"configured={ai_group.configured_count()}/5"
+            )
         )
 
     except Exception:
@@ -4959,7 +5180,7 @@ async def setup_hook():
 
 
 # ============================================================
-# START BOT
+# START
 # ============================================================
 
 if not TOKEN:
