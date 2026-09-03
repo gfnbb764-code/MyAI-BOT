@@ -1040,19 +1040,6 @@ async def generate_chat_reply(
             # ------------------------------------------------
             # AI ENGINE
             # ------------------------------------------------
-            #
-            # IMPORTANT:
-            # AIEngine.generate() عندك يستخدم:
-            #
-            # prompt
-            # character
-            #
-            # وليس:
-            #
-            # user_message
-            # character_name
-            #
-            # ------------------------------------------------
 
             result = await asyncio.wait_for(
                 ai.generate(
@@ -3333,18 +3320,76 @@ async def ai_config(
     )
 
 
+# ============================================================
+# CHARACTER CREATE
+# ============================================================
+
 @bot.tree.command(
     name="character_create",
     description="إنشاء شخصية AI"
 )
 @app_commands.describe(
     name="اسم الشخصية",
-    character_type="نوع الشخصية"
+    character_type="نوع الشخصية (اختياري، الافتراضي عادي)"
+)
+@app_commands.choices(
+    character_type=[
+        app_commands.Choice(
+            name="عادي",
+            value="normal"
+        ),
+        app_commands.Choice(
+            name="هادئ",
+            value="calm"
+        ),
+        app_commands.Choice(
+            name="ذكي",
+            value="smart"
+        ),
+        app_commands.Choice(
+            name="مضحك",
+            value="funny"
+        ),
+        app_commands.Choice(
+            name="ودود",
+            value="friendly"
+        ),
+        app_commands.Choice(
+            name="رسمي",
+            value="formal"
+        ),
+        app_commands.Choice(
+            name="حماسي",
+            value="energetic"
+        ),
+        app_commands.Choice(
+            name="فظ",
+            value="rude"
+        ),
+        app_commands.Choice(
+            name="مشاغب",
+            value="mischievous"
+        ),
+        app_commands.Choice(
+            name="فضولي",
+            value="curious"
+        ),
+        app_commands.Choice(
+            name="إبداعي",
+            value="creative"
+        ),
+        app_commands.Choice(
+            name="احترافي",
+            value="professional"
+        ),
+    ]
 )
 async def character_create(
     interaction: discord.Interaction,
     name: str,
-    character_type: str
+    character_type: Optional[
+        app_commands.Choice[str]
+    ] = None
 ):
 
     if not interaction.guild:
@@ -3361,14 +3406,15 @@ async def character_create(
 
         return
 
-    if character_type not in CHARACTER_TYPES:
+    # إذا لم يحدد المستخدم نوعًا، يصبح النوع عادي تلقائيًا
+    selected_character_type = (
+        character_type.value
+        if character_type
+        else "normal"
+    )
 
-        await interaction.response.send_message(
-            "❌ نوع الشخصية غير صحيح.",
-            ephemeral=True
-        )
-
-        return
+    if selected_character_type not in CHARACTER_TYPES:
+        selected_character_type = "normal"
 
     try:
 
@@ -3377,7 +3423,7 @@ async def character_create(
             db.create_character(
                 guild_id=interaction.guild.id,
                 name=name,
-                character_type=character_type,
+                character_type=selected_character_type,
                 created_by=interaction.user.id,
                 provider="google",
                 model=GOOGLE_MODEL
@@ -3388,14 +3434,22 @@ async def character_create(
             db.create_character(
                 interaction.guild.id,
                 name,
-                character_type=character_type,
+                character_type=selected_character_type,
                 created_by=interaction.user.id,
                 provider="google",
                 model=GOOGLE_MODEL
             )
 
+        type_name = CHARACTER_TYPES.get(
+            selected_character_type,
+            "عادي"
+        )
+
         await interaction.response.send_message(
-            f"✅ تم إنشاء الشخصية **{name}**.",
+            (
+                f"✅ تم إنشاء الشخصية **{name}** بنجاح!\n"
+                f"🎭 النوع: **{type_name}**"
+            ),
             ephemeral=True
         )
 
