@@ -3,6 +3,7 @@ import re
 import asyncio
 import random
 import traceback
+import time
 
 import discord
 from discord.ext import commands
@@ -212,6 +213,96 @@ SENSITIVE_KEYWORDS = (
     "manage channels",
     "permissions",
 )
+
+
+# ==========================================================
+# BOT CHAT PROTECTION
+# ==========================================================
+
+# أقصى عدد لردود MyAI المتتالية في Bot Chat
+MAX_BOT_CHAT_CHAIN = 6
+
+# أقل مدة بين ردود Bot Chat في نفس القناة
+BOT_CHAT_COOLDOWN = 2.0
+
+# عدد الردود المتتالية لكل قناة
+BOT_CHAT_CHAINS = {}
+
+# آخر وقت رد فيه MyAI في كل قناة
+BOT_CHAT_LAST_RESPONSE = {}
+
+# Lock لكل قناة لمنع تشغيل عدة Bot Chat requests معًا
+BOT_CHAT_LOCKS = {}
+
+
+def get_bot_chat_lock(channel_id):
+
+    lock = BOT_CHAT_LOCKS.get(channel_id)
+
+    if lock is None:
+
+        lock = asyncio.Lock()
+
+        BOT_CHAT_LOCKS[channel_id] = lock
+
+    return lock
+
+
+def reset_bot_chat_chain(channel_id):
+
+    BOT_CHAT_CHAINS.pop(
+        channel_id,
+        None
+    )
+
+    BOT_CHAT_LAST_RESPONSE.pop(
+        channel_id,
+        None
+    )
+
+
+def get_bot_chat_chain(channel_id):
+
+    return BOT_CHAT_CHAINS.get(
+        channel_id,
+        0
+    )
+
+
+def increment_bot_chat_chain(channel_id):
+
+    BOT_CHAT_CHAINS[channel_id] = (
+        get_bot_chat_chain(channel_id) + 1
+    )
+
+    BOT_CHAT_LAST_RESPONSE[channel_id] = (
+        time.monotonic()
+    )
+
+    return BOT_CHAT_CHAINS[channel_id]
+
+
+def bot_chat_cooldown_remaining(channel_id):
+
+    last = BOT_CHAT_LAST_RESPONSE.get(
+        channel_id
+    )
+
+    if last is None:
+        return 0.0
+
+    elapsed = (
+        time.monotonic() - last
+    )
+
+    remaining = (
+        BOT_CHAT_COOLDOWN - elapsed
+    )
+
+    return max(
+        0.0,
+        remaining
+    )
 
 
 # ==========================================================
@@ -1254,7 +1345,6 @@ async def ai_setup(
 
 # ==========================================================
 # /ai_config
-# TOP 3 ROLES ONLY
 # ==========================================================
 
 @bot.tree.command(
@@ -1400,7 +1490,6 @@ CHARACTER_CHOICES = [
 
 # ==========================================================
 # /character_create
-# ALL MEMBERS
 # ==========================================================
 
 @bot.tree.command(
@@ -1505,7 +1594,6 @@ async def character_create(
 
 # ==========================================================
 # /character_edit
-# OWNER ONLY
 # ==========================================================
 
 @bot.tree.command(
@@ -1564,7 +1652,11 @@ async def character_edit(
 
         return
 
-    if character_type is None and custom_instructions is None and speaking_style is None:
+    if (
+        character_type is None
+        and custom_instructions is None
+        and speaking_style is None
+    ):
 
         await interaction.response.send_message(
             "ℹ️ لم ترسل أي تغيير.",
@@ -1621,7 +1713,6 @@ async def character_edit(
 
 # ==========================================================
 # /character_delete
-# OWNER ONLY
 # ==========================================================
 
 @bot.tree.command(
@@ -1760,9 +1851,14 @@ async def character_list(
             "created_by"
         )
 
+        try:
+            owner_id_int = int(owner_id)
+        except Exception:
+            owner_id_int = 0
+
         owner = (
-            f"<@{owner_id}>"
-            if owner_id and int(owner_id) != 0
+            f"<@{owner_id_int}>"
+            if owner_id_int != 0
             else "System"
         )
 
@@ -1816,6 +1912,34 @@ async def character_use(
 
         return
 
+    character = normalize_text(
+        character
+    )
+
+    if not character:
+
+        await interaction.response.send_message(
+            "❌ يجب إدخال اسم الشخصية.",
+            ephemeral=True
+        )
+
+        return
+
+    # نتأكد أن الشخصية موجودة قبل تغييرها
+    character_data = get_character(
+        interaction.guild.id,
+        character
+    )
+
+    if not character_data:
+
+        await interaction.response.send_message(
+            f"❌ الشخصية **{character}** غير موجودة.",
+            ephemeral=True
+        )
+
+        return
+
     try:
 
         selected = db.set_active_character(
@@ -1823,8 +1947,30 @@ async def character_use(
             character
         )
 
+        selected = row_to_dict(
+            selected
+        )
+
+        # بعض نسخ Database ترجع name
+        # وبعض النسخ القديمة قد ترجع character_name
+        selected_name = (
+            selected.get("name")
+            if selected
+            else None
+        )
+
+        if not selected_name and selected:
+
+            selected_name = selected.get(
+                "character_name"
+            )
+
+        if not selected_name:
+
+            selected_name = character
+
         await interaction.response.send_message(
-            f"✅ الشخصية الحالية: **{selected['character_name']}**",
+            f"✅ الشخصية الحالية: **{selected_name}**",
             ephemeral=True
         )
 
@@ -1834,8 +1980,10 @@ async def character_use(
             f"❌ Character use error: {e}"
         )
 
+        traceback.print_exc()
+
         await interaction.response.send_message(
-            f"❌ {e}",
+            f"❌ حدث خطأ أثناء اختيار الشخصية: {e}",
             ephemeral=True
         )
 
@@ -1935,6 +2083,11 @@ async def ai_memory_clear(
         interaction.guild.id
     )
 
+    # مسح Bot Chat أيضًا
+    reset_bot_chat_chain(
+        interaction.channel.id
+    )
+
     await interaction.response.send_message(
         "🧹 تم مسح ذاكرة MyAI لهذا السيرفر.",
         ephemeral=True
@@ -2032,6 +2185,67 @@ def get_request_key(
 
 
 # ==========================================================
+# BOT CHAT VALIDATION
+# ==========================================================
+
+def should_process_bot_chat(
+    message,
+    config
+):
+
+    if not message.guild:
+        return False
+
+    if not message.author.bot:
+        return False
+
+    # لا نرد على أنفسنا
+    if (
+        bot.user
+        and message.author.id == bot.user.id
+    ):
+        return False
+
+    reply_type = (
+        config.get("reply_type")
+        or "mention"
+    )
+
+    if reply_type != "bot_chat":
+        return False
+
+    channel_id = message.channel.id
+
+    chain = get_bot_chat_chain(
+        channel_id
+    )
+
+    if chain >= MAX_BOT_CHAT_CHAIN:
+
+        print(
+            "🛑 Bot Chat chain limit reached "
+            f"({chain}/{MAX_BOT_CHAT_CHAIN})"
+        )
+
+        return False
+
+    remaining = bot_chat_cooldown_remaining(
+        channel_id
+    )
+
+    if remaining > 0:
+
+        print(
+            f"⏱️ Bot Chat cooldown active: "
+            f"{remaining:.2f}s"
+        )
+
+        return False
+
+    return True
+
+
+# ==========================================================
 # ON MESSAGE
 # ==========================================================
 
@@ -2104,22 +2318,19 @@ async def on_message(
         return
 
     # ------------------------------------------------------
-    # Ignore bots
-    # ------------------------------------------------------
-
-    if message.author.bot:
-
-        print(
-            "⏭️ Ignored another bot"
-        )
-
-        return
-
-    # ------------------------------------------------------
     # DM
     # ------------------------------------------------------
 
     if message.guild is None:
+
+        # البوتات لا تستخدم نظام DM
+        if message.author.bot:
+
+            print(
+                "⏭️ Ignored bot DM"
+            )
+
+            return
 
         print(
             "📩 Direct Message received"
@@ -2214,42 +2425,90 @@ async def on_message(
         return
 
     # ------------------------------------------------------
-    # SENSITIVE REQUEST SECURITY
+    # BOT CHAT
     # ------------------------------------------------------
 
-    if is_sensitive_request(
-        message.content
-    ):
+    if message.author.bot:
 
-        print(
-            "🛡️ Sensitive request detected"
-        )
-
-        authorized, reason = security_check(
-            message.author
-        )
-
-        if not authorized:
+        if not should_process_bot_chat(
+            message,
+            config
+        ):
 
             print(
-                f"🛡️ BLOCKED: {reason}"
-            )
-
-            await message.reply(
-                "🛡️ **تم رفض الطلب**\n\n"
-                "هذا الطلب يتعلق بإدارة حساسة "
-                "للسيرفر.\n\n"
-                "👑 التنفيذ مسموح فقط لأعلى "
-                "3 رتب في السيرفر.\n\n"
-                f"⚠️ السبب: {reason}",
-                mention_author=False
+                "⏭️ Bot message ignored "
+                "(Bot Chat disabled, cooldown, or chain limit)"
             )
 
             return
 
         print(
-            "🛡️ Sensitive request passed security gate"
+            "🤖 Bot Chat message accepted"
         )
+
+        print(
+            f"🔗 Current Bot Chat chain: "
+            f"{get_bot_chat_chain(message.channel.id)}/"
+            f"{MAX_BOT_CHAT_CHAIN}"
+        )
+
+        # لا نستخدم mention/direct logic مع Bot Chat
+        reply_type = "bot_chat"
+
+    else:
+
+        # الإنسان يبدأ محادثة جديدة،
+        # لذلك نكسر سلسلة Bot Chat السابقة.
+        reset_bot_chat_chain(
+            message.channel.id
+        )
+
+        reply_type = (
+            config.get("reply_type")
+            or "mention"
+        )
+
+    # ------------------------------------------------------
+    # SENSITIVE REQUEST SECURITY
+    # ------------------------------------------------------
+
+    # طلبات البوتات لا تُعامل كطلبات إدارية
+    # إلا إذا كان مصدرها مستخدمًا حقيقيًا.
+    if not message.author.bot:
+
+        if is_sensitive_request(
+            message.content
+        ):
+
+            print(
+                "🛡️ Sensitive request detected"
+            )
+
+            authorized, reason = security_check(
+                message.author
+            )
+
+            if not authorized:
+
+                print(
+                    f"🛡️ BLOCKED: {reason}"
+                )
+
+                await message.reply(
+                    "🛡️ **تم رفض الطلب**\n\n"
+                    "هذا الطلب يتعلق بإدارة حساسة "
+                    "للسيرفر.\n\n"
+                    "👑 التنفيذ مسموح فقط لأعلى "
+                    "3 رتب في السيرفر.\n\n"
+                    f"⚠️ السبب: {reason}",
+                    mention_author=False
+                )
+
+                return
+
+            print(
+                "🛡️ Sensitive request passed security gate"
+            )
 
     # ------------------------------------------------------
     # MODE
@@ -2260,11 +2519,6 @@ async def on_message(
         or "normal"
     )
 
-    reply_type = (
-        config.get("reply_type")
-        or "mention"
-    )
-
     if mode not in AI_MODES:
 
         print(
@@ -2272,6 +2526,10 @@ async def on_message(
         )
 
         mode = "normal"
+
+    # ------------------------------------------------------
+    # REPLY TYPE
+    # ------------------------------------------------------
 
     if reply_type not in REPLY_TYPES:
 
@@ -2281,49 +2539,109 @@ async def on_message(
 
         reply_type = "mention"
 
-    directed = is_directed_to_bot(
-        message
-    )
-
     # ------------------------------------------------------
-    # MENTION
+    # BOT CHAT
     # ------------------------------------------------------
 
-    if reply_type == "mention":
+    if reply_type == "bot_chat":
 
-        if not directed:
+        if not message.author.bot:
+
+            print(
+                "⏭️ Bot Chat only accepts bot messages"
+            )
 
             return
 
-    # ------------------------------------------------------
-    # DIRECT
-    # ------------------------------------------------------
+        # الحماية الإضافية من الحلقة
+        chain = get_bot_chat_chain(
+            message.channel.id
+        )
 
-    elif reply_type == "direct":
+        if chain >= MAX_BOT_CHAT_CHAIN:
 
-        if not directed:
+            print(
+                "🛑 Bot Chat stopped by chain protection"
+            )
 
             return
 
+    else:
+
+        directed = is_directed_to_bot(
+            message
+        )
+
+        # --------------------------------------------------
+        # MENTION
+        # --------------------------------------------------
+
+        if reply_type == "mention":
+
+            if not directed:
+
+                return
+
+        # --------------------------------------------------
+        # DIRECT
+        # --------------------------------------------------
+
+        elif reply_type == "direct":
+
+            if not directed:
+
+                return
+
+        # --------------------------------------------------
+        # CHANNEL
+        # --------------------------------------------------
+
+        elif reply_type == "channel":
+
+            pass
+
+        # --------------------------------------------------
+        # AUTO
+        # --------------------------------------------------
+
+        elif reply_type == "auto":
+
+            pass
+
     # ------------------------------------------------------
-    # CHANNEL / AUTO / BOT CHAT
+    # CORRECT LOGGING
     # ------------------------------------------------------
-
-    elif reply_type == "channel":
-
-        pass
-
-    elif reply_type == "auto":
-
-        pass
-
-    elif reply_type == "bot_chat":
-
-        pass
 
     print(
-        f"🎯 Selected mode: {reply_type}"
+        f"🎯 Reply type: {reply_type}"
     )
+
+    print(
+        f"🎯 AI mode: {mode}"
+    )
+
+    # ------------------------------------------------------
+    # BOT CHAT LOCK
+    # ------------------------------------------------------
+
+    bot_chat_lock = None
+
+    if reply_type == "bot_chat":
+
+        bot_chat_lock = get_bot_chat_lock(
+            message.channel.id
+        )
+
+        if bot_chat_lock.locked():
+
+            print(
+                "⏭️ Another Bot Chat request "
+                "is already running in this channel"
+            )
+
+            return
+
+        await bot_chat_lock.acquire()
 
     key = get_request_key(
         message
@@ -2334,6 +2652,9 @@ async def on_message(
         print(
             "⏭️ Duplicate active AI request ignored"
         )
+
+        if bot_chat_lock and bot_chat_lock.locked():
+            bot_chat_lock.release()
 
         return
 
@@ -2347,6 +2668,21 @@ async def on_message(
             config.get("character_name")
             or "مساعد السيرفر جيميناي"
         )
+
+        # --------------------------------------------------
+        # BOT CHAT CHAIN INCREMENT
+        # --------------------------------------------------
+
+        if reply_type == "bot_chat":
+
+            chain = increment_bot_chat_chain(
+                message.channel.id
+            )
+
+            print(
+                f"🔗 Bot Chat chain -> "
+                f"{chain}/{MAX_BOT_CHAT_CHAIN}"
+            )
 
         await generate_with_typing_message(
 
@@ -2365,6 +2701,24 @@ async def on_message(
         ACTIVE_REQUESTS.discard(
             key
         )
+
+        if bot_chat_lock and bot_chat_lock.locked():
+
+            bot_chat_lock.release()
+
+    # ------------------------------------------------------
+    # OPTIONAL COMMAND PROCESSING
+    # ------------------------------------------------------
+
+    try:
+
+        await bot.process_commands(
+            message
+        )
+
+    except Exception:
+
+        traceback.print_exc()
 
 
 # ==========================================================
@@ -2440,7 +2794,17 @@ async def on_ready():
     )
 
     print(
-        "🤖 Bot-to-Bot mode available."
+        "🤖 Bot-to-Bot mode | ENABLED"
+    )
+
+    print(
+        f"🛑 Bot Chat chain limit | "
+        f"{MAX_BOT_CHAT_CHAIN}"
+    )
+
+    print(
+        f"⏱️ Bot Chat cooldown | "
+        f"{BOT_CHAT_COOLDOWN}s"
     )
 
     print(
