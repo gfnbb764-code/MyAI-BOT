@@ -7,7 +7,7 @@ import sqlite3
 import traceback
 import time
 from dataclasses import dataclass
-from typing import Optional, Callable, Awaitable, Any
+from typing import Optional, Callable, Awaitable
 
 import discord
 from discord import app_commands
@@ -52,30 +52,39 @@ MAX_AI_RESPONSE_LENGTH = 2000
 
 DEFAULT_POWER = 50
 DEFAULT_PARTICIPATION = 100
-
 DEFAULT_MAX_TURNS = 5
 DEFAULT_COOLDOWN = 5.0
 DEFAULT_ROUND_DELAY = 0.0
 
 # ============================================================
-# NEW CHAT TIMING
+# CHAT TIMING
 # ============================================================
 
-# أول بوت يبدأ مباشرة.
-# البوتات التالية تنتظر 3 ثواني لقراءة رد البوت السابق.
+# البوت الأول يبدأ مباشرة.
+# البوتات التالية تنتظر 3 ثواني لقراءة الرد السابق.
 BOT_READ_DELAY = 3.0
 
-# وقت انتظار التوليد قبل إرسال الرد.
+# أقل مدة انتظار للتوليد قبل إرسال الرد.
 BOT_GENERATION_DELAY = 2.0
 
-# مدة الدردشة الافتراضية: ساعة واحدة.
+# مدة الدردشة الافتراضية = ساعة.
 DEFAULT_CHAT_DURATION = 60 * 60
 
-# الحد الأقصى: 12 ساعة.
+# أقصى مدة = 12 ساعة.
 MAX_CHAT_DURATION = 12 * 60 * 60
 
-# الحد الأدنى: دقيقة واحدة.
+# أقل مدة = دقيقة.
 MIN_CHAT_DURATION = 60
+
+# ============================================================
+# MEMORY
+# ============================================================
+
+# أقصى عدد من الذكريات المحفوظة لكل بوت/قروب.
+MAX_MEMORY_ITEMS = 50
+
+# أقصى طول للذاكرة الواحدة.
+MAX_MEMORY_ITEM_LENGTH = 1200
 
 
 # ============================================================
@@ -106,8 +115,6 @@ class GroupSettings:
     cooldown: float = DEFAULT_COOLDOWN
     round_delay: float = DEFAULT_ROUND_DELAY
     leader_slot: int = 1
-
-    # NEW
     chat_duration: int = DEFAULT_CHAT_DURATION
 
 
@@ -116,9 +123,14 @@ class GroupSettings:
 # ============================================================
 
 class AIGroupDB:
+
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._setup()
+
+    # ========================================================
+    # CONNECTION
+    # ========================================================
 
     def _connect(self):
         conn = sqlite3.connect(
@@ -126,6 +138,7 @@ class AIGroupDB:
             timeout=30,
             check_same_thread=False,
         )
+
         conn.row_factory = sqlite3.Row
 
         try:
@@ -137,17 +150,40 @@ class AIGroupDB:
 
         return conn
 
-    def _column_exists(self, conn, table: str, column: str) -> bool:
+    # ========================================================
+    # COLUMN CHECK
+    # ========================================================
+
+    def _column_exists(
+        self,
+        conn,
+        table: str,
+        column: str,
+    ) -> bool:
+
         rows = conn.execute(
             f"PRAGMA table_info({table})"
         ).fetchall()
 
-        return any(row["name"] == column for row in rows)
+        return any(
+            row["name"] == column
+            for row in rows
+        )
+
+    # ========================================================
+    # SETUP / MIGRATION
+    # ========================================================
 
     def _setup(self):
+
         conn = self._connect()
 
         try:
+
+            # ------------------------------------------------
+            # SETTINGS
+            # ------------------------------------------------
+
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS ai_group_settings (
@@ -164,10 +200,6 @@ class AIGroupDB:
                 """
             )
 
-            # ------------------------------------------------
-            # SETTINGS MIGRATION
-            # ------------------------------------------------
-
             if not self._column_exists(
                 conn,
                 "ai_group_settings",
@@ -178,10 +210,6 @@ class AIGroupDB:
                     ALTER TABLE ai_group_settings
                     ADD COLUMN chat_duration INTEGER DEFAULT 3600
                     """
-                )
-
-                print(
-                    "[AI_GROUP][DB] Added chat_duration column."
                 )
 
             conn.execute(
@@ -216,7 +244,6 @@ class AIGroupDB:
                 """
             )
 
-            # Bot migrations
             bot_columns = [
                 ("power", "INTEGER DEFAULT 50"),
                 ("personality", "TEXT DEFAULT ''"),
@@ -228,6 +255,7 @@ class AIGroupDB:
             ]
 
             for column, definition in bot_columns:
+
                 if not self._column_exists(
                     conn,
                     "ai_group_bots",
@@ -256,6 +284,30 @@ class AIGroupDB:
                 """
             )
 
+            # ------------------------------------------------
+            # MEMORY
+            # ------------------------------------------------
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ai_group_memory (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    slot INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )
+                """
+            )
+
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_ai_group_memory
+                ON ai_group_memory(guild_id, slot, created_at)
+                """
+            )
+
             conn.commit()
 
             print("[AI_GROUP][DB] Database ready.")
@@ -267,10 +319,15 @@ class AIGroupDB:
     # SETTINGS
     # ========================================================
 
-    def get_settings(self, guild_id: int) -> GroupSettings:
+    def get_settings(
+        self,
+        guild_id: int,
+    ) -> GroupSettings:
+
         conn = self._connect()
 
         try:
+
             row = conn.execute(
                 """
                 SELECT *
@@ -281,40 +338,65 @@ class AIGroupDB:
             ).fetchone()
 
             if row is None:
-                return GroupSettings(guild_id=guild_id)
+                return GroupSettings(
+                    guild_id=guild_id
+                )
 
             duration = row["chat_duration"]
 
             if duration is None:
                 duration = DEFAULT_CHAT_DURATION
 
-            duration = int(duration)
-
             duration = max(
                 MIN_CHAT_DURATION,
-                min(MAX_CHAT_DURATION, duration),
+                min(
+                    MAX_CHAT_DURATION,
+                    int(duration),
+                ),
             )
 
             return GroupSettings(
                 guild_id=guild_id,
                 enabled=bool(row["enabled"]),
                 channel_id=row["channel_id"],
-                mode=row["mode"] or "round_robin",
+                mode=(
+                    row["mode"]
+                    if row["mode"] in VALID_MODES
+                    else "round_robin"
+                ),
                 max_turns=max(
                     1,
-                    min(100, int(row["max_turns"] or DEFAULT_MAX_TURNS)),
+                    min(
+                        100,
+                        int(
+                            row["max_turns"]
+                            or DEFAULT_MAX_TURNS
+                        ),
+                    ),
                 ),
                 cooldown=max(
                     0.0,
-                    float(row["cooldown"] or DEFAULT_COOLDOWN),
+                    float(
+                        row["cooldown"]
+                        or DEFAULT_COOLDOWN
+                    ),
                 ),
                 round_delay=max(
                     0.0,
-                    float(row["round_delay"] or DEFAULT_ROUND_DELAY),
+                    float(
+                        row["round_delay"]
+                        or DEFAULT_ROUND_DELAY
+                    ),
                 ),
                 leader_slot=max(
                     1,
-                    min(MAX_BOTS, int(row["leader_slot"] or 1)),
+                    min(
+                        MAX_BOTS,
+                        int(
+                            row["leader_slot"]
+                            or 1
+                        ),
+                    ),
                 ),
                 chat_duration=duration,
             )
@@ -322,7 +404,11 @@ class AIGroupDB:
         finally:
             conn.close()
 
-    def save_settings(self, settings: GroupSettings):
+    def save_settings(
+        self,
+        settings: GroupSettings,
+    ):
+
         duration = max(
             MIN_CHAT_DURATION,
             min(
@@ -340,6 +426,7 @@ class AIGroupDB:
         conn = self._connect()
 
         try:
+
             conn.execute(
                 """
                 INSERT INTO ai_group_settings (
@@ -354,6 +441,7 @@ class AIGroupDB:
                     chat_duration
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+
                 ON CONFLICT(guild_id)
                 DO UPDATE SET
                     enabled = excluded.enabled,
@@ -370,10 +458,28 @@ class AIGroupDB:
                     int(settings.enabled),
                     settings.channel_id,
                     mode,
-                    max(1, min(100, int(settings.max_turns))),
-                    max(0.0, float(settings.cooldown)),
-                    max(0.0, float(settings.round_delay)),
-                    max(1, min(MAX_BOTS, int(settings.leader_slot))),
+                    max(
+                        1,
+                        min(
+                            100,
+                            int(settings.max_turns),
+                        ),
+                    ),
+                    max(
+                        0.0,
+                        float(settings.cooldown),
+                    ),
+                    max(
+                        0.0,
+                        float(settings.round_delay),
+                    ),
+                    max(
+                        1,
+                        min(
+                            MAX_BOTS,
+                            int(settings.leader_slot),
+                        ),
+                    ),
                     duration,
                 ),
             )
@@ -384,7 +490,7 @@ class AIGroupDB:
             conn.close()
 
     # ========================================================
-    # BOT CONFIG
+    # BOT
     # ========================================================
 
     def get_bot(
@@ -392,9 +498,11 @@ class AIGroupDB:
         guild_id: int,
         slot: int,
     ) -> GroupBotConfig:
+
         conn = self._connect()
 
         try:
+
             row = conn.execute(
                 """
                 SELECT *
@@ -402,7 +510,10 @@ class AIGroupDB:
                 WHERE guild_id = ?
                   AND slot = ?
                 """,
-                (guild_id, slot),
+                (
+                    guild_id,
+                    slot,
+                ),
             ).fetchone()
 
             if row is None:
@@ -415,20 +526,36 @@ class AIGroupDB:
             return GroupBotConfig(
                 guild_id=guild_id,
                 slot=slot,
-                name=row["name"] or DEFAULT_NAMES[slot - 1],
+                name=(
+                    row["name"]
+                    or DEFAULT_NAMES[slot - 1]
+                ),
                 power=max(
                     1,
-                    min(100, int(row["power"] or DEFAULT_POWER)),
+                    min(
+                        100,
+                        int(
+                            row["power"]
+                            or DEFAULT_POWER
+                        ),
+                    ),
                 ),
-                personality=row["personality"] or "",
-                speaking_style=row["speaking_style"] or "",
+                personality=(
+                    row["personality"]
+                    or ""
+                ),
+                speaking_style=(
+                    row["speaking_style"]
+                    or ""
+                ),
                 participation=max(
                     0,
                     min(
                         100,
                         int(
                             row["participation"]
-                            if row["participation"] is not None
+                            if row["participation"]
+                            is not None
                             else DEFAULT_PARTICIPATION
                         ),
                     ),
@@ -436,7 +563,8 @@ class AIGroupDB:
                 memory=bool(row["memory"]),
                 reply_mode=(
                     row["reply_mode"]
-                    if row["reply_mode"] in VALID_REPLY_MODES
+                    if row["reply_mode"]
+                    in VALID_REPLY_MODES
                     else "reply"
                 ),
                 enabled=bool(row["enabled"]),
@@ -445,7 +573,11 @@ class AIGroupDB:
         finally:
             conn.close()
 
-    def save_bot(self, bot: GroupBotConfig):
+    def save_bot(
+        self,
+        bot: GroupBotConfig,
+    ):
+
         name = (
             bot.name.strip()
             or DEFAULT_NAMES[bot.slot - 1]
@@ -456,6 +588,7 @@ class AIGroupDB:
         conn = self._connect()
 
         try:
+
             conn.execute(
                 """
                 INSERT INTO ai_group_bots (
@@ -471,6 +604,7 @@ class AIGroupDB:
                     enabled
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+
                 ON CONFLICT(guild_id, slot)
                 DO UPDATE SET
                     name = excluded.name,
@@ -486,17 +620,24 @@ class AIGroupDB:
                     bot.guild_id,
                     bot.slot,
                     name,
-                    max(1, min(100, int(bot.power))),
+                    max(
+                        1,
+                        min(100, int(bot.power)),
+                    ),
                     bot.personality,
                     bot.speaking_style,
                     max(
                         0,
-                        min(100, int(bot.participation)),
+                        min(
+                            100,
+                            int(bot.participation),
+                        ),
                     ),
                     int(bot.memory),
                     (
                         bot.reply_mode
-                        if bot.reply_mode in VALID_REPLY_MODES
+                        if bot.reply_mode
+                        in VALID_REPLY_MODES
                         else "reply"
                     ),
                     int(bot.enabled),
@@ -517,9 +658,11 @@ class AIGroupDB:
         guild_id: int,
         slot: int,
     ):
+
         conn = self._connect()
 
         try:
+
             conn.execute(
                 """
                 INSERT INTO ai_group_stats (
@@ -529,11 +672,15 @@ class AIGroupDB:
                     errors
                 )
                 VALUES (?, ?, 1, 0)
+
                 ON CONFLICT(guild_id, slot)
                 DO UPDATE SET
                     messages = messages + 1
                 """,
-                (guild_id, slot),
+                (
+                    guild_id,
+                    slot,
+                ),
             )
 
             conn.commit()
@@ -546,9 +693,11 @@ class AIGroupDB:
         guild_id: int,
         slot: int,
     ):
+
         conn = self._connect()
 
         try:
+
             conn.execute(
                 """
                 INSERT INTO ai_group_stats (
@@ -558,11 +707,15 @@ class AIGroupDB:
                     errors
                 )
                 VALUES (?, ?, 0, 1)
+
                 ON CONFLICT(guild_id, slot)
                 DO UPDATE SET
                     errors = errors + 1
                 """,
-                (guild_id, slot),
+                (
+                    guild_id,
+                    slot,
+                ),
             )
 
             conn.commit()
@@ -575,9 +728,11 @@ class AIGroupDB:
         guild_id: int,
         slot: int,
     ):
+
         conn = self._connect()
 
         try:
+
             row = conn.execute(
                 """
                 SELECT messages, errors
@@ -585,7 +740,10 @@ class AIGroupDB:
                 WHERE guild_id = ?
                   AND slot = ?
                 """,
-                (guild_id, slot),
+                (
+                    guild_id,
+                    slot,
+                ),
             ).fetchone()
 
             if row is None:
@@ -595,9 +753,275 @@ class AIGroupDB:
                 }
 
             return {
-                "messages": int(row["messages"] or 0),
-                "errors": int(row["errors"] or 0),
+                "messages": int(
+                    row["messages"] or 0
+                ),
+                "errors": int(
+                    row["errors"] or 0
+                ),
             }
+
+        finally:
+            conn.close()
+
+    # ========================================================
+    # MEMORY
+    # ========================================================
+
+    def add_memory(
+        self,
+        guild_id: int,
+        slot: int,
+        content: str,
+    ):
+
+        content = str(content).strip()
+
+        if not content:
+            return
+
+        content = content[
+            :MAX_MEMORY_ITEM_LENGTH
+        ]
+
+        conn = self._connect()
+
+        try:
+
+            conn.execute(
+                """
+                INSERT INTO ai_group_memory (
+                    guild_id,
+                    slot,
+                    content,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    guild_id,
+                    slot,
+                    content,
+                    time.time(),
+                ),
+            )
+
+            # Keep only newest MAX_MEMORY_ITEMS.
+            conn.execute(
+                """
+                DELETE FROM ai_group_memory
+                WHERE guild_id = ?
+                  AND slot = ?
+                  AND id NOT IN (
+                      SELECT id
+                      FROM ai_group_memory
+                      WHERE guild_id = ?
+                        AND slot = ?
+                      ORDER BY created_at DESC
+                      LIMIT ?
+                  )
+                """,
+                (
+                    guild_id,
+                    slot,
+                    guild_id,
+                    slot,
+                    MAX_MEMORY_ITEMS,
+                ),
+            )
+
+            conn.commit()
+
+        finally:
+            conn.close()
+
+    def get_memory(
+        self,
+        guild_id: int,
+        slot: int,
+        limit: int = 15,
+    ) -> list[str]:
+
+        conn = self._connect()
+
+        try:
+
+            rows = conn.execute(
+                """
+                SELECT content
+                FROM ai_group_memory
+                WHERE guild_id = ?
+                  AND slot = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (
+                    guild_id,
+                    slot,
+                    max(
+                        1,
+                        min(50, limit),
+                    ),
+                ),
+            ).fetchall()
+
+            return [
+                row["content"]
+                for row in reversed(rows)
+            ]
+
+        finally:
+            conn.close()
+
+    def clear_memory(
+        self,
+        guild_id: int,
+        slot: Optional[int] = None,
+    ):
+
+        conn = self._connect()
+
+        try:
+
+            if slot is None:
+                conn.execute(
+                    """
+                    DELETE FROM ai_group_memory
+                    WHERE guild_id = ?
+                    """,
+                    (guild_id,),
+                )
+            else:
+                conn.execute(
+                    """
+                    DELETE FROM ai_group_memory
+                    WHERE guild_id = ?
+                      AND slot = ?
+                    """,
+                    (
+                        guild_id,
+                        slot,
+                    ),
+                )
+
+            conn.commit()
+
+        finally:
+            conn.close()
+
+    def memory_count(
+        self,
+        guild_id: int,
+        slot: Optional[int] = None,
+    ) -> int:
+
+        conn = self._connect()
+
+        try:
+
+            if slot is None:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS c
+                    FROM ai_group_memory
+                    WHERE guild_id = ?
+                    """,
+                    (guild_id,),
+                ).fetchone()
+
+            else:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS c
+                    FROM ai_group_memory
+                    WHERE guild_id = ?
+                      AND slot = ?
+                    """,
+                    (
+                        guild_id,
+                        slot,
+                    ),
+                ).fetchone()
+
+            return int(row["c"] or 0)
+
+        finally:
+            conn.close()
+
+    # ========================================================
+    # FACTORY RESET
+    # ========================================================
+
+    def factory_reset(
+        self,
+        guild_id: int,
+    ):
+
+        conn = self._connect()
+
+        try:
+
+            # -----------------------------------------------
+            # Reset group settings.
+            # -----------------------------------------------
+
+            conn.execute(
+                """
+                DELETE FROM ai_group_settings
+                WHERE guild_id = ?
+                """,
+                (guild_id,),
+            )
+
+            # -----------------------------------------------
+            # Reset bot settings BUT KEEP NAME.
+            # -----------------------------------------------
+
+            conn.execute(
+                """
+                UPDATE ai_group_bots
+                SET
+                    power = ?,
+                    personality = '',
+                    speaking_style = '',
+                    participation = ?,
+                    memory = 1,
+                    reply_mode = 'reply',
+                    enabled = 1
+                WHERE guild_id = ?
+                """,
+                (
+                    DEFAULT_POWER,
+                    DEFAULT_PARTICIPATION,
+                    guild_id,
+                ),
+            )
+
+            # -----------------------------------------------
+            # Delete memory.
+            # -----------------------------------------------
+
+            conn.execute(
+                """
+                DELETE FROM ai_group_memory
+                WHERE guild_id = ?
+                """,
+                (guild_id,),
+            )
+
+            # -----------------------------------------------
+            # Reset statistics.
+            # -----------------------------------------------
+
+            conn.execute(
+                """
+                DELETE FROM ai_group_stats
+                WHERE guild_id = ?
+                """,
+                (guild_id,),
+            )
+
+            conn.commit()
 
         finally:
             conn.close()
@@ -614,23 +1038,33 @@ class SecondaryBotClient(discord.Client):
         manager,
         slot: int,
     ):
+
         intents = discord.Intents.default()
 
-        # مهم:
-        # لا نريد البوتات الثانوية معالجة الرسائل
-        # حتى لا تدخل في loop لا نهائي.
-        intents.message_content = False
-        intents.messages = True
         intents.guilds = True
+        intents.messages = True
 
-        super().__init__(intents=intents)
+        # مهم جدًا:
+        # لا نستقبل محتوى رسائل Discord من البوتات الثانوية.
+        # هذا يمنع الـ loop.
+        intents.message_content = False
+
+        super().__init__(
+            intents=intents
+        )
 
         self.manager = manager
         self.slot = slot
 
     async def on_ready(self):
-        self.manager.online[self.slot] = True
-        self.manager.ready_events[self.slot].set()
+
+        self.manager.online[
+            self.slot
+        ] = True
+
+        self.manager.ready_events[
+            self.slot
+        ].set()
 
         username = (
             str(self.user)
@@ -639,11 +1073,15 @@ class SecondaryBotClient(discord.Client):
         )
 
         print(
-            f"[AI_GROUP] Bot {self.slot} ONLINE as {username}"
+            f"[AI_GROUP] Bot {self.slot} "
+            f"ONLINE as {username}"
         )
 
     async def on_disconnect(self):
-        self.manager.online[self.slot] = False
+
+        self.manager.online[
+            self.slot
+        ] = False
 
 
 # ============================================================
@@ -658,40 +1096,78 @@ class AIGroupManager:
         db_path: str,
         ai_generate: Callable[..., Awaitable[str]],
     ):
+
         self.main_bot = main_bot
 
-        self.db = AIGroupDB(db_path)
+        self.db = AIGroupDB(
+            db_path
+        )
 
         self.ai_generate = ai_generate
 
-        self.clients: dict[int, SecondaryBotClient] = {}
-        self.tasks: dict[int, asyncio.Task] = {}
+        self.clients: dict[
+            int,
+            SecondaryBotClient
+        ] = {}
 
-        self.online: dict[int, bool] = {
+        self.tasks: dict[
+            int,
+            asyncio.Task
+        ] = {}
+
+        self.online: dict[
+            int,
+            bool
+        ] = {
             slot: False
-            for slot in range(1, MAX_BOTS + 1)
+            for slot in range(
+                1,
+                MAX_BOTS + 1,
+            )
         }
 
-        self.ready_events: dict[int, asyncio.Event] = {
+        self.ready_events: dict[
+            int,
+            asyncio.Event
+        ] = {
             slot: asyncio.Event()
-            for slot in range(1, MAX_BOTS + 1)
+            for slot in range(
+                1,
+                MAX_BOTS + 1,
+            )
         }
 
-        self.locks: dict[int, asyncio.Lock] = {}
+        self.locks: dict[
+            int,
+            asyncio.Lock
+        ] = {}
 
-        self.cooldown_until: dict[int, float] = {}
+        self.cooldown_until: dict[
+            int,
+            float
+        ] = {}
 
-        self.group_tasks: dict[int, asyncio.Task] = {}
+        self.group_tasks: dict[
+            int,
+            asyncio.Task
+        ] = {}
 
-        self.round_robin: dict[int, int] = {}
+        self.round_robin: dict[
+            int,
+            int
+        ] = {}
 
         self.shutdown_flag = False
 
     # ========================================================
-    # HELPERS
+    # BASIC
     # ========================================================
 
-    def get_token(self, slot: int) -> Optional[str]:
+    def get_token(
+        self,
+        slot: int,
+    ) -> Optional[str]:
+
         if not 1 <= slot <= MAX_BOTS:
             return None
 
@@ -705,51 +1181,65 @@ class AIGroupManager:
         return token.strip()
 
     def configured_count(self) -> int:
-        count = 0
 
-        for slot in range(1, MAX_BOTS + 1):
-            if self.get_token(slot):
-                count += 1
-
-        return count
-
-    def ready_count(self) -> int:
         return sum(
             1
-            for slot in range(1, MAX_BOTS + 1)
-            if self.online.get(slot, False)
+            for slot in range(
+                1,
+                MAX_BOTS + 1,
+            )
+            if self.get_token(slot)
         )
 
-    def get_lock(self, guild_id: int) -> asyncio.Lock:
-        lock = self.locks.get(guild_id)
+    def ready_count(self) -> int:
 
-        if lock is None:
-            lock = asyncio.Lock()
-            self.locks[guild_id] = lock
+        return sum(
+            1
+            for slot in range(
+                1,
+                MAX_BOTS + 1,
+            )
+            if self.online.get(
+                slot,
+                False,
+            )
+        )
 
-        return lock
-
-    def get_client(
+    def get_lock(
         self,
-        slot: int,
-    ) -> Optional[SecondaryBotClient]:
-        return self.clients.get(slot)
+        guild_id: int,
+    ) -> asyncio.Lock:
+
+        if guild_id not in self.locks:
+            self.locks[guild_id] = (
+                asyncio.Lock()
+            )
+
+        return self.locks[guild_id]
 
     # ========================================================
     # START CLIENTS
     # ========================================================
 
     async def start_clients(self):
+
         self.shutdown_flag = False
 
-        for slot in range(1, MAX_BOTS + 1):
+        for slot in range(
+            1,
+            MAX_BOTS + 1,
+        ):
+
             token = self.get_token(slot)
 
             if not token:
+
                 print(
                     f"[AI_GROUP] Bot {slot} skipped: "
-                    f"{BOT_ENV_NAMES[slot - 1]} is missing."
+                    f"{BOT_ENV_NAMES[slot - 1]} "
+                    "is missing."
                 )
+
                 continue
 
             client = SecondaryBotClient(
@@ -775,10 +1265,15 @@ class AIGroupManager:
         token: str,
         client: SecondaryBotClient,
     ):
+
         try:
-            await client.start(token)
+
+            await client.start(
+                token
+            )
 
         except discord.LoginFailure as exc:
+
             self.online[slot] = False
 
             print(
@@ -787,9 +1282,11 @@ class AIGroupManager:
             )
 
         except asyncio.CancelledError:
+
             raise
 
         except Exception as exc:
+
             self.online[slot] = False
 
             print(
@@ -800,17 +1297,21 @@ class AIGroupManager:
             traceback.print_exc()
 
     # ========================================================
-    # COMMAND REGISTRATION
+    # COMMAND
     # ========================================================
 
     async def register_command(
         self,
         tree: app_commands.CommandTree,
     ):
+
         async def callback(
             interaction: discord.Interaction,
         ):
-            await self.show_dashboard(interaction)
+
+            await self.show_dashboard(
+                interaction
+            )
 
         command = app_commands.Command(
             name="ai_group",
@@ -818,7 +1319,9 @@ class AIGroupManager:
             callback=callback,
         )
 
-        tree.add_command(command)
+        tree.add_command(
+            command
+        )
 
     # ========================================================
     # DASHBOARD
@@ -828,11 +1331,14 @@ class AIGroupManager:
         self,
         interaction: discord.Interaction,
     ):
+
         if interaction.guild is None:
+
             await interaction.response.send_message(
                 "❌ هذا الأمر داخل السيرفر فقط.",
                 ephemeral=True,
             )
+
             return
 
         settings = self.db.get_settings(
@@ -844,14 +1350,12 @@ class AIGroupManager:
             settings,
         )
 
-        view = GroupDashboardView(
-            self,
-            interaction.guild.id,
-        )
-
         await interaction.response.send_message(
             embed=embed,
-            view=view,
+            view=GroupDashboardView(
+                self,
+                interaction.guild.id,
+            ),
             ephemeral=True,
         )
 
@@ -860,15 +1364,6 @@ class AIGroupManager:
         guild: discord.Guild,
         settings: GroupSettings,
     ):
-        duration_text = self.format_duration(
-            settings.chat_duration
-        )
-
-        channel_text = (
-            f"<#{settings.channel_id}>"
-            if settings.channel_id
-            else "غير محدد"
-        )
 
         status = (
             "🟢 مفعّل"
@@ -876,16 +1371,26 @@ class AIGroupManager:
             else "🔴 متوقف"
         )
 
-        mode_names = {
+        channel = (
+            f"<#{settings.channel_id}>"
+            if settings.channel_id
+            else "غير محدد"
+        )
+
+        modes = {
             "round_robin": "🔄 Round Robin",
             "random": "🎲 Random",
             "leader": "👑 Leader",
         }
 
+        memory_count = self.db.memory_count(
+            guild.id
+        )
+
         embed = discord.Embed(
             title="🤖 AI Group",
             description=(
-                "لوحة التحكم بمجموعة البوتات الذكية."
+                "مجموعة البوتات الذكية"
             ),
         )
 
@@ -897,13 +1402,13 @@ class AIGroupManager:
 
         embed.add_field(
             name="الروم",
-            value=channel_text,
+            value=channel,
             inline=True,
         )
 
         embed.add_field(
             name="النمط",
-            value=mode_names.get(
+            value=modes.get(
                 settings.mode,
                 settings.mode,
             ),
@@ -913,7 +1418,7 @@ class AIGroupManager:
         embed.add_field(
             name="⏱️ مدة الدردشة",
             value=(
-                f"**{duration_text}**\n"
+                f"**{self.format_duration(settings.chat_duration)}**\n"
                 "الحد الأقصى: **12 ساعة**"
             ),
             inline=False,
@@ -923,21 +1428,25 @@ class AIGroupManager:
             name="⚡ سرعة الرد",
             value=(
                 "البوت الأول: **مباشرة**\n"
-                "البوت التالي: **3 ثواني قراءة**\n"
-                "+ **2 ثانية توليد**"
+                "البوت التالي: **3 ثوانٍ قراءة**\n"
+                "ثم **2 ثانية توليد**"
             ),
             inline=False,
         )
 
         embed.add_field(
-            name="🔁 الحد الأقصى للجولات",
-            value=str(settings.max_turns),
+            name="🧠 الذاكرة",
+            value=(
+                f"**{memory_count}** ذكريات محفوظة"
+            ),
             inline=True,
         )
 
         embed.add_field(
-            name="⏳ Cooldown",
-            value=f"{settings.cooldown:g}s",
+            name="🔄 أقصى جولات",
+            value=str(
+                settings.max_turns
+            ),
             inline=True,
         )
 
@@ -961,31 +1470,42 @@ class AIGroupManager:
         slot: int,
         new_name: str,
     ) -> tuple[bool, str]:
-        client = self.clients.get(slot)
+
+        client = self.clients.get(
+            slot
+        )
 
         if client is None:
+
             return (
                 False,
                 "❌ البوت غير متصل.",
             )
 
         if client.user is None:
+
             return (
                 False,
                 "❌ بيانات البوت غير جاهزة.",
             )
 
-        new_name = new_name.strip()
+        new_name = (
+            new_name.strip()
+        )
 
         if not new_name:
+
             return (
                 False,
                 "❌ الاسم فارغ.",
             )
 
-        new_name = new_name[:MAX_USERNAME_LENGTH]
+        new_name = new_name[
+            :MAX_USERNAME_LENGTH
+        ]
 
         try:
+
             await client.user.edit(
                 username=new_name
             )
@@ -996,19 +1516,21 @@ class AIGroupManager:
             )
 
         except discord.HTTPException as exc:
+
             return (
                 False,
                 f"❌ تعذر تغيير الاسم: {exc}",
             )
 
         except Exception as exc:
+
             return (
                 False,
                 f"❌ خطأ: {exc}",
             )
 
     # ========================================================
-    # SETTINGS
+    # GROUP ENABLE / DISABLE
     # ========================================================
 
     async def set_enabled(
@@ -1016,64 +1538,136 @@ class AIGroupManager:
         guild_id: int,
         enabled: bool,
     ):
-        settings = self.db.get_settings(guild_id)
+
+        settings = self.db.get_settings(
+            guild_id
+        )
+
         settings.enabled = enabled
 
-        self.db.save_settings(settings)
+        self.db.save_settings(
+            settings
+        )
+
+        # -----------------------------------------------
+        # IMPORTANT:
+        # OFF immediately cancels current conversation.
+        # -----------------------------------------------
+
+        if not enabled:
+
+            task = self.group_tasks.get(
+                guild_id
+            )
+
+            if task and not task.done():
+
+                task.cancel()
+
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
+
+            self.group_tasks.pop(
+                guild_id,
+                None,
+            )
+
+            print(
+                f"[AI_GROUP] Group OFF -> "
+                f"active chat cancelled "
+                f"for guild {guild_id}."
+            )
+
+    # ========================================================
+    # CHANNEL
+    # ========================================================
 
     async def set_channel(
         self,
         guild_id: int,
         channel_id: Optional[int],
     ):
-        settings = self.db.get_settings(guild_id)
+
+        settings = self.db.get_settings(
+            guild_id
+        )
+
         settings.channel_id = channel_id
 
-        self.db.save_settings(settings)
+        self.db.save_settings(
+            settings
+        )
+
+    # ========================================================
+    # MODE
+    # ========================================================
 
     async def set_mode(
         self,
         guild_id: int,
         mode: str,
     ):
+
         if mode not in VALID_MODES:
             mode = "round_robin"
 
-        settings = self.db.get_settings(guild_id)
+        settings = self.db.get_settings(
+            guild_id
+        )
+
         settings.mode = mode
 
-        self.db.save_settings(settings)
+        self.db.save_settings(
+            settings
+        )
+
+    # ========================================================
+    # DURATION
+    # ========================================================
 
     async def set_chat_duration(
         self,
         guild_id: int,
         seconds: int,
     ) -> tuple[bool, str]:
+
         try:
             seconds = int(seconds)
+
         except Exception:
+
             return (
                 False,
                 "❌ المدة يجب أن تكون رقمًا.",
             )
 
         if seconds < MIN_CHAT_DURATION:
+
             return (
                 False,
                 "❌ أقل مدة مسموحة هي **دقيقة واحدة**.",
             )
 
         if seconds > MAX_CHAT_DURATION:
+
             return (
                 False,
                 "❌ أقصى مدة للدردشة هي **12 ساعة**.",
             )
 
-        settings = self.db.get_settings(guild_id)
+        settings = self.db.get_settings(
+            guild_id
+        )
 
         settings.chat_duration = seconds
 
-        self.db.save_settings(settings)
+        self.db.save_settings(
+            settings
+        )
 
         return (
             True,
@@ -1089,6 +1683,7 @@ class AIGroupManager:
         self,
         message: discord.Message,
     ) -> bool:
+
         if message.guild is None:
             return False
 
@@ -1107,17 +1702,20 @@ class AIGroupManager:
         if settings.channel_id is None:
             return False
 
-        if message.channel.id != settings.channel_id:
+        if (
+            message.channel.id
+            != settings.channel_id
+        ):
             return False
 
         now = time.monotonic()
 
-        cooldown_until = self.cooldown_until.get(
+        cooldown = self.cooldown_until.get(
             guild_id,
             0.0,
         )
 
-        if now < cooldown_until:
+        if now < cooldown:
             return False
 
         self.cooldown_until[guild_id] = (
@@ -1132,7 +1730,9 @@ class AIGroupManager:
             return True
 
         task = asyncio.create_task(
-            self._safe_run_group(message)
+            self._safe_run_group(
+                message
+            )
         )
 
         self.group_tasks[guild_id] = task
@@ -1143,22 +1743,76 @@ class AIGroupManager:
         self,
         message: discord.Message,
     ):
+
         guild_id = message.guild.id
 
+        current_task = (
+            asyncio.current_task()
+        )
+
         try:
-            async with self.get_lock(guild_id):
-                await self.run_group(message)
+
+            async with self.get_lock(
+                guild_id
+            ):
+
+                await self.run_group(
+                    message
+                )
 
         except asyncio.CancelledError:
+
+            print(
+                f"[AI_GROUP] Active chat cancelled "
+                f"for guild {guild_id}."
+            )
+
             raise
 
         except Exception as exc:
+
             print(
                 "[AI_GROUP] Group generation error: "
                 f"{type(exc).__name__}: {exc}"
             )
 
             traceback.print_exc()
+
+        finally:
+
+            if (
+                self.group_tasks.get(
+                    guild_id
+                )
+                is current_task
+            ):
+                self.group_tasks.pop(
+                    guild_id,
+                    None,
+                )
+
+    # ========================================================
+    # LIVE ENABLE CHECK
+    # ========================================================
+
+    def is_group_enabled(
+        self,
+        guild_id: int,
+    ) -> bool:
+
+        try:
+
+            settings = self.db.get_settings(
+                guild_id
+            )
+
+            return bool(
+                settings.enabled
+            )
+
+        except Exception:
+
+            return False
 
     # ========================================================
     # RUN GROUP
@@ -1168,6 +1822,7 @@ class AIGroupManager:
         self,
         message: discord.Message,
     ):
+
         guild_id = message.guild.id
 
         settings = self.db.get_settings(
@@ -1186,7 +1841,21 @@ class AIGroupManager:
 
         candidates = []
 
-        for slot in range(1, MAX_BOTS + 1):
+        # ----------------------------------------------------
+        # Find available bots.
+        # ----------------------------------------------------
+
+        for slot in range(
+            1,
+            MAX_BOTS + 1,
+        ):
+
+            # LIVE OFF CHECK
+            if not self.is_group_enabled(
+                guild_id
+            ):
+                return
+
             cfg = self.db.get_bot(
                 guild_id,
                 slot,
@@ -1204,22 +1873,26 @@ class AIGroupManager:
             ):
                 continue
 
-            # participation
+            # Participation chance.
             if cfg.participation < 100:
-                roll = random.randint(
-                    1,
-                    100,
-                )
 
-                if roll > cfg.participation:
+                if (
+                    random.randint(1, 100)
+                    > cfg.participation
+                ):
                     continue
 
-            candidates.append(cfg)
+            candidates.append(
+                cfg
+            )
 
         if not candidates:
+
             print(
-                "[AI_GROUP] No available secondary bots."
+                "[AI_GROUP] No available "
+                "secondary bots."
             )
+
             return
 
         # ----------------------------------------------------
@@ -1227,34 +1900,47 @@ class AIGroupManager:
         # ----------------------------------------------------
 
         if settings.mode == "random":
-            random.shuffle(candidates)
+
+            random.shuffle(
+                candidates
+            )
 
         elif settings.mode == "leader":
+
             leader = None
             others = []
 
             for cfg in candidates:
-                if cfg.slot == settings.leader_slot:
+
+                if (
+                    cfg.slot
+                    == settings.leader_slot
+                ):
                     leader = cfg
+
                 else:
                     others.append(cfg)
 
-            if leader is not None:
+            if leader:
+
                 candidates = [
                     leader,
                     *others,
                 ]
+
             else:
+
                 candidates = others
 
         else:
-            # round robin
+
             start = self.round_robin.get(
                 guild_id,
                 0,
             )
 
             if candidates:
+
                 start %= len(candidates)
 
                 candidates = (
@@ -1267,115 +1953,126 @@ class AIGroupManager:
                     % len(candidates)
                 )
 
+        # ----------------------------------------------------
+        # Conversation
+        # ----------------------------------------------------
+
         conversation = (
             message.content
             or "(رسالة فارغة)"
         )
 
-        previous_message: Optional[
-            discord.Message
-        ] = None
+        previous_message = None
 
         turns = 0
 
         # ----------------------------------------------------
-        # CHAT LOOP
+        # MAIN LOOP
         # ----------------------------------------------------
 
         while (
             turns < settings.max_turns
             and candidates
         ):
-            # ------------------------------------------------
-            # 12 HOUR SESSION LIMIT
-            # ------------------------------------------------
 
-            if time.monotonic() >= session_deadline:
+            # LIVE OFF CHECK
+            if not self.is_group_enabled(
+                guild_id
+            ):
+                return
+
+            if (
+                time.monotonic()
+                >= session_deadline
+            ):
+
                 print(
-                    f"[AI_GROUP] Chat session expired "
-                    f"for guild {guild_id}."
+                    f"[AI_GROUP] Chat duration "
+                    f"expired for guild {guild_id}."
                 )
-                break
+
+                return
 
             for cfg in candidates:
 
                 # --------------------------------------------
-                # Check session time before each bot
+                # LIVE OFF
                 # --------------------------------------------
 
-                if time.monotonic() >= session_deadline:
-                    print(
-                        "[AI_GROUP] Chat duration reached."
-                    )
+                if not self.is_group_enabled(
+                    guild_id
+                ):
                     return
 
                 # --------------------------------------------
-                # FIRST BOT
+                # SESSION TIME
                 # --------------------------------------------
 
-                if previous_message is None:
-                    # أول بوت يبدأ مباشرة.
-                    pass
+                if (
+                    time.monotonic()
+                    >= session_deadline
+                ):
+                    return
 
-                else:
-                    # ----------------------------------------
-                    # 3 SECONDS READING DELAY
-                    # ----------------------------------------
+                # --------------------------------------------
+                # READ PREVIOUS BOT
+                # --------------------------------------------
 
-                    remaining = (
-                        session_deadline
-                        - time.monotonic()
-                    )
+                if previous_message is not None:
 
-                    if remaining <= 0:
-                        return
-
-                    await asyncio.sleep(
-                        min(
-                            BOT_READ_DELAY,
-                            remaining,
-                        )
-                    )
-
-                    if (
-                        time.monotonic()
-                        >= session_deadline
+                    if not await self.interruptible_wait(
+                        guild_id,
+                        BOT_READ_DELAY,
+                        session_deadline,
                     ):
                         return
 
                 # --------------------------------------------
-                # BUILD PROMPT
+                # LIVE OFF AGAIN
+                # --------------------------------------------
+
+                if not self.is_group_enabled(
+                    guild_id
+                ):
+                    return
+
+                # --------------------------------------------
+                # PROMPT
                 # --------------------------------------------
 
                 prompt = (
                     "رسالة المستخدم الأصلية:\n"
                     f"{message.content}\n\n"
-                    "سياق المحادثة بين أعضاء المجموعة:\n"
+                    "سياق المحادثة الحالية:\n"
                     f"{conversation}\n\n"
-                    "اكتب ردك الطبيعي الآن."
+                    "أنت عضو في مجموعة AI. "
+                    "تابع الحوار بشكل طبيعي.\n"
+                    "لا تكرر كلام الأعضاء بلا سبب.\n"
+                    "اكتب ردك الآن."
                 )
 
                 # --------------------------------------------
-                # GENERATION
+                # GENERATE
                 # --------------------------------------------
-
-                remaining = (
-                    session_deadline
-                    - time.monotonic()
-                )
-
-                if remaining <= 0:
-                    return
 
                 try:
+
                     result = await self.generate_for_bot(
                         message=message,
                         cfg=cfg,
                         prompt=prompt,
-                        generation_time_limit=remaining,
+                        generation_time_limit=(
+                            session_deadline
+                            - time.monotonic()
+                        ),
                     )
 
+                except asyncio.CancelledError:
+
+                    raise
+
                 except Exception as exc:
+
                     self.db.add_error_stat(
                         guild_id,
                         cfg.slot,
@@ -1383,11 +2080,20 @@ class AIGroupManager:
 
                     print(
                         f"[AI_GROUP] Bot {cfg.slot} "
-                        "generation error: "
+                        f"generation error: "
                         f"{type(exc).__name__}: {exc}"
                     )
 
                     continue
+
+                # --------------------------------------------
+                # LIVE OFF BEFORE SEND
+                # --------------------------------------------
+
+                if not self.is_group_enabled(
+                    guild_id
+                ):
+                    return
 
                 if not result:
                     continue
@@ -1397,6 +2103,7 @@ class AIGroupManager:
                 # --------------------------------------------
 
                 try:
+
                     sent = await self.send_bot_message(
                         message=message,
                         cfg=cfg,
@@ -1404,14 +2111,12 @@ class AIGroupManager:
                         previous_message=previous_message,
                     )
 
-                    if sent is None:
-                        self.db.add_error_stat(
-                            guild_id,
-                            cfg.slot,
-                        )
-                        continue
+                except asyncio.CancelledError:
+
+                    raise
 
                 except Exception as exc:
+
                     self.db.add_error_stat(
                         guild_id,
                         cfg.slot,
@@ -1419,10 +2124,13 @@ class AIGroupManager:
 
                     print(
                         f"[AI_GROUP] Bot {cfg.slot} "
-                        "send error: "
+                        f"send error: "
                         f"{type(exc).__name__}: {exc}"
                     )
 
+                    continue
+
+                if sent is None:
                     continue
 
                 # --------------------------------------------
@@ -1442,37 +2150,90 @@ class AIGroupManager:
 
                 turns += 1
 
+                # --------------------------------------------
+                # SAVE MEMORY
+                # --------------------------------------------
+
+                if cfg.memory:
+
+                    memory_text = (
+                        f"المستخدم: "
+                        f"{message.content}\n"
+                        f"{cfg.name}: "
+                        f"{result}"
+                    )
+
+                    self.db.add_memory(
+                        guild_id,
+                        cfg.slot,
+                        memory_text,
+                    )
+
                 if turns >= settings.max_turns:
                     break
 
                 # --------------------------------------------
-                # OPTIONAL EXTRA ROUND DELAY
+                # OPTIONAL ROUND DELAY
                 # --------------------------------------------
 
-                # افتراضيًا 0 ثانية حتى لا يكون هناك
-                # تأخير إضافي فوق 3 + 2.
                 if settings.round_delay > 0:
-                    remaining = (
-                        session_deadline
-                        - time.monotonic()
-                    )
 
-                    if remaining <= 0:
+                    if not await self.interruptible_wait(
+                        guild_id,
+                        settings.round_delay,
+                        session_deadline,
+                    ):
                         return
 
-                    await asyncio.sleep(
-                        min(
-                            settings.round_delay,
-                            remaining,
-                        )
-                    )
+    # ========================================================
+    # INTERRUPTIBLE WAIT
+    # ========================================================
 
-            # end for
+    async def interruptible_wait(
+        self,
+        guild_id: int,
+        seconds: float,
+        deadline: float,
+    ) -> bool:
 
-        # end while
+        end = min(
+            time.monotonic() + seconds,
+            deadline,
+        )
+
+        while time.monotonic() < end:
+
+            # OFF -> immediate stop.
+            if not self.is_group_enabled(
+                guild_id
+            ):
+                return False
+
+            remaining = (
+                end
+                - time.monotonic()
+            )
+
+            if remaining <= 0:
+                break
+
+            await asyncio.sleep(
+                min(
+                    0.20,
+                    remaining,
+                )
+            )
+
+        return (
+            self.is_group_enabled(
+                guild_id
+            )
+            and time.monotonic()
+            < deadline
+        )
 
     # ========================================================
-    # GENERATE
+    # GENERATE FOR BOT
     # ========================================================
 
     async def generate_for_bot(
@@ -1482,6 +2243,7 @@ class AIGroupManager:
         prompt: str,
         generation_time_limit: float,
     ) -> str:
+
         personality = (
             cfg.personality.strip()
             or "ودود، ذكي، طبيعي."
@@ -1492,17 +2254,52 @@ class AIGroupManager:
             or "تكلم بشكل طبيعي ومختصر."
         )
 
+        # ----------------------------------------------------
+        # MEMORY
+        # ----------------------------------------------------
+
+        memory_text = ""
+
+        if cfg.memory:
+
+            memories = self.db.get_memory(
+                message.guild.id,
+                cfg.slot,
+                limit=15,
+            )
+
+            if memories:
+
+                memory_text = (
+                    "\n\n"
+                    "🧠 ذاكرتك السابقة:\n"
+                    + "\n".join(
+                        f"- {item}"
+                        for item in memories
+                    )
+                )
+
+        # ----------------------------------------------------
+        # SYSTEM CONTEXT
+        # ----------------------------------------------------
+
         system_context = (
-            f"أنت {cfg.name}، عضو رقم {cfg.slot} "
-            "في مجموعة AI.\n"
-            f"قوة شخصيتك: {cfg.power}/100.\n"
-            f"شخصيتك: {personality}\n"
-            f"أسلوب كلامك: {speaking_style}\n"
+            f"أنت {cfg.name}، عضو رقم "
+            f"{cfg.slot} في مجموعة AI.\n"
+            f"قوة شخصيتك: "
+            f"{cfg.power}/100.\n"
+            f"شخصيتك: "
+            f"{personality}\n"
+            f"أسلوب كلامك: "
+            f"{speaking_style}\n"
             "\n"
-            "أنت عضو في مجموعة من البوتات."
-            " لا تدّعي أنك البوت الرئيسي."
-            " لا تكرر كلام الأعضاء بلا سبب."
-            " تابع سياق الحوار ورد بشكل طبيعي."
+            "أنت عضو في مجموعة من البوتات.\n"
+            "لا تدّعي أنك البوت الرئيسي.\n"
+            "لا تتحدث عن إعدادات النظام الداخلية.\n"
+            "لا تكرر كلام الأعضاء بلا سبب.\n"
+            "حافظ على شخصيتك وأسلوبك.\n"
+            "استخدم الذاكرة السابقة عندما تكون مفيدة."
+            + memory_text
         )
 
         final_prompt = (
@@ -1512,22 +2309,17 @@ class AIGroupManager:
         )
 
         # ----------------------------------------------------
-        # GENERATION DELAY
-        # ----------------------------------------------------
-        #
-        # هذا هو وقت التوليد المحدد:
-        # 2 ثانية.
-        #
-        # ملاحظة:
-        # هذا delay وليس إجبارًا على أن API نفسها تنتهي
-        # خلال ثانيتين.
-        #
-        # إذا انتهى API قبلها نكمل بقية الثانية.
-        # وإذا API استغرق أكثر، ننتظر نتيجته حتى timeout
-        # الخاص بالمحرك.
+        # GENERATE
         # ----------------------------------------------------
 
-        generation_started = time.monotonic()
+        generation_started = (
+            time.monotonic()
+        )
+
+        timeout = max(
+            1.0,
+            generation_time_limit,
+        )
 
         result = await asyncio.wait_for(
             self.ai_generate(
@@ -1541,14 +2333,11 @@ class AIGroupManager:
                 speaking_style=speaking_style,
                 power=cfg.power,
             ),
-            timeout=max(
-                1.0,
-                generation_time_limit,
-            ),
+            timeout=timeout,
         )
 
         # ----------------------------------------------------
-        # Keep the visible timing at 2 seconds minimum.
+        # 2 SECOND MINIMUM VISIBLE GENERATION DELAY
         # ----------------------------------------------------
 
         elapsed = (
@@ -1557,6 +2346,7 @@ class AIGroupManager:
         )
 
         if elapsed < BOT_GENERATION_DELAY:
+
             wait_time = (
                 BOT_GENERATION_DELAY
                 - elapsed
@@ -1568,6 +2358,7 @@ class AIGroupManager:
             )
 
             if remaining > 0:
+
                 await asyncio.sleep(
                     min(
                         wait_time,
@@ -1575,12 +2366,24 @@ class AIGroupManager:
                     )
                 )
 
+        # ----------------------------------------------------
+        # LIVE OFF
+        # ----------------------------------------------------
+
+        if not self.is_group_enabled(
+            message.guild.id
+        ):
+            return ""
+
         if not result:
             return ""
 
-        result = str(result).strip()
+        result = str(
+            result
+        ).strip()
 
         if len(result) > MAX_AI_RESPONSE_LENGTH:
+
             result = result[
                 :MAX_AI_RESPONSE_LENGTH
             ]
@@ -1588,7 +2391,7 @@ class AIGroupManager:
         return result
 
     # ========================================================
-    # SEND BOT MESSAGE
+    # SEND
     # ========================================================
 
     async def send_bot_message(
@@ -1604,6 +2407,7 @@ class AIGroupManager:
         )
 
         if client is None:
+
             raise RuntimeError(
                 "Secondary client not found."
             )
@@ -1613,68 +2417,163 @@ class AIGroupManager:
         )
 
         if channel is None:
+
             channel = await client.fetch_channel(
                 message.channel.id
             )
 
-        allowed_mentions = discord.AllowedMentions(
-            users=False,
-            roles=False,
-            everyone=False,
-            replied_user=False,
+        allowed_mentions = (
+            discord.AllowedMentions(
+                users=False,
+                roles=False,
+                everyone=False,
+                replied_user=False,
+            )
         )
 
-        # ----------------------------------------------------
+        # -----------------------------------------------
+        # LIVE OFF BEFORE SEND
+        # -----------------------------------------------
+
+        if not self.is_group_enabled(
+            message.guild.id
+        ):
+            return None
+
+        # -----------------------------------------------
         # FIRST BOT
-        # ----------------------------------------------------
+        # -----------------------------------------------
 
         if previous_message is None:
 
             if cfg.reply_mode == "channel":
+
                 return await channel.send(
                     text,
-                    allowed_mentions=allowed_mentions,
+                    allowed_mentions=(
+                        allowed_mentions
+                    ),
                 )
 
             return await channel.send(
                 text,
                 reference=message,
                 mention_author=False,
-                allowed_mentions=allowed_mentions,
+                allowed_mentions=(
+                    allowed_mentions
+                ),
             )
 
-        # ----------------------------------------------------
-        # NEXT BOTS
-        # ----------------------------------------------------
+        # -----------------------------------------------
+        # NEXT BOT
+        # -----------------------------------------------
 
         if cfg.reply_mode == "channel":
+
             return await channel.send(
                 text,
-                allowed_mentions=allowed_mentions,
+                allowed_mentions=(
+                    allowed_mentions
+                ),
             )
 
         return await channel.send(
             text,
             reference=previous_message,
             mention_author=False,
-            allowed_mentions=allowed_mentions,
+            allowed_mentions=(
+                allowed_mentions
+            ),
         )
 
     # ========================================================
-    # FORMAT DURATION
+    # MEMORY CLEAR
+    # ========================================================
+
+    async def clear_memory(
+        self,
+        guild_id: int,
+    ):
+
+        self.db.clear_memory(
+            guild_id
+        )
+
+    # ========================================================
+    # FACTORY RESET
+    # ========================================================
+
+    async def factory_reset(
+        self,
+        guild_id: int,
+    ):
+
+        # Stop active chat first.
+        task = self.group_tasks.get(
+            guild_id
+        )
+
+        if task and not task.done():
+
+            task.cancel()
+
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+
+        self.group_tasks.pop(
+            guild_id,
+            None,
+        )
+
+        # Reset DB.
+        self.db.factory_reset(
+            guild_id
+        )
+
+        # Reset round-robin state.
+        self.round_robin.pop(
+            guild_id,
+            None,
+        )
+
+        self.cooldown_until.pop(
+            guild_id,
+            None,
+        )
+
+        print(
+            f"[AI_GROUP] Factory reset "
+            f"completed for guild {guild_id}. "
+            "Bot names were preserved."
+        )
+
+    # ========================================================
+    # FORMAT
     # ========================================================
 
     @staticmethod
     def format_duration(
         seconds: int,
     ) -> str:
-        seconds = max(0, int(seconds))
+
+        seconds = max(
+            0,
+            int(seconds),
+        )
 
         hours = seconds // 3600
+
         minutes = (
             seconds % 3600
         ) // 60
-        secs = seconds % 60
+
+        secs = (
+            seconds % 60
+        )
 
         parts = []
 
@@ -1703,21 +2602,22 @@ class AIGroupManager:
     # ========================================================
 
     async def stop_clients(self):
+
         self.shutdown_flag = True
 
-        # Stop group tasks
         for task in list(
             self.group_tasks.values()
         ):
+
             if task and not task.done():
                 task.cancel()
 
         self.group_tasks.clear()
 
-        # Stop secondary clients
         for client in list(
             self.clients.values()
         ):
+
             try:
                 await client.close()
             except Exception:
@@ -1729,9 +2629,11 @@ class AIGroupManager:
             self.online[slot] = False
 
     async def emergency_stop(self):
+
         for task in list(
             self.group_tasks.values()
         ):
+
             if task and not task.done():
                 task.cancel()
 
@@ -1739,22 +2641,29 @@ class AIGroupManager:
 
 
 # ============================================================
-# DASHBOARD VIEW
+# DASHBOARD
 # ============================================================
 
-class GroupDashboardView(discord.ui.View):
+class GroupDashboardView(
+    discord.ui.View
+):
 
     def __init__(
         self,
         manager: AIGroupManager,
         guild_id: int,
     ):
+
         super().__init__(
             timeout=300
         )
 
         self.manager = manager
         self.guild_id = guild_id
+
+    # ========================================================
+    # TOGGLE
+    # ========================================================
 
     @discord.ui.button(
         label="تشغيل / إيقاف",
@@ -1767,19 +2676,25 @@ class GroupDashboardView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         settings = self.manager.db.get_settings(
             self.guild_id
         )
 
-        settings.enabled = not settings.enabled
+        new_state = not settings.enabled
 
-        self.manager.db.save_settings(
-            settings
+        await self.manager.set_enabled(
+            self.guild_id,
+            new_state,
         )
 
         await self.refresh(
             interaction
         )
+
+    # ========================================================
+    # SETTINGS
+    # ========================================================
 
     @discord.ui.button(
         label="إعدادات القروب",
@@ -1792,11 +2707,11 @@ class GroupDashboardView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         embed = discord.Embed(
             title="⚙️ إعدادات AI Group",
             description=(
-                "تحكم في مدة الدردشة وسرعة التفاعل "
-                "وباقي إعدادات المجموعة."
+                "تحكم في القروب والمدة والذاكرة."
             ),
         )
 
@@ -1805,7 +2720,7 @@ class GroupDashboardView(discord.ui.View):
         )
 
         embed.add_field(
-            name="⏱️ مدة الدردشة الحالية",
+            name="⏱️ مدة الدردشة",
             value=(
                 f"**{self.manager.format_duration(current.chat_duration)}**"
             ),
@@ -1831,32 +2746,39 @@ class GroupDashboardView(discord.ui.View):
         )
 
         embed.add_field(
+            name="🧠 الذاكرة",
+            value=(
+                f"**{self.manager.db.memory_count(self.guild_id)}** "
+                "ذكريات"
+            ),
+            inline=True,
+        )
+
+        embed.add_field(
             name="⚡ أول بوت",
-            value="**يرد مباشرة**",
-            inline=False,
-        )
-
-        embed.add_field(
-            name="🔄 الحد الأقصى للجولات",
-            value=str(current.max_turns),
+            value="**مباشرة**",
             inline=True,
         )
 
         embed.add_field(
-            name="⏳ Cooldown",
-            value=f"{current.cooldown:g}s",
+            name="🔄 أقصى جولات",
+            value=str(
+                current.max_turns
+            ),
             inline=True,
-        )
-
-        view = GroupSettingsView(
-            self.manager,
-            self.guild_id,
         )
 
         await interaction.response.edit_message(
             embed=embed,
-            view=view,
+            view=GroupSettingsView(
+                self.manager,
+                self.guild_id,
+            ),
         )
+
+    # ========================================================
+    # BOTS
+    # ========================================================
 
     @discord.ui.button(
         label="البوتات",
@@ -1869,19 +2791,24 @@ class GroupDashboardView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
+        embed = discord.Embed(
+            title="🤖 بوتات AI Group",
+            description=(
+                "اختر البوت الذي تريد تعديله."
+            ),
+        )
+
         view = BotPickerView(
             self.manager,
             self.guild_id,
         )
 
-        embed = discord.Embed(
-            title="🤖 بوتات AI Group",
-            description=(
-                "اختر البوت الذي تريد تعديل إعداداته."
-            ),
-        )
+        for slot in range(
+            1,
+            MAX_BOTS + 1,
+        ):
 
-        for slot in range(1, MAX_BOTS + 1):
             cfg = self.manager.db.get_bot(
                 self.guild_id,
                 slot,
@@ -1906,7 +2833,8 @@ class GroupDashboardView(discord.ui.View):
                 name=f"{online} Bot {slot}",
                 value=(
                     f"**{cfg.name}**\n"
-                    f"{enabled} • قوة {cfg.power}/100"
+                    f"{enabled} • "
+                    f"قوة {cfg.power}/100"
                 ),
                 inline=True,
             )
@@ -1916,10 +2844,15 @@ class GroupDashboardView(discord.ui.View):
             view=view,
         )
 
+    # ========================================================
+    # REFRESH
+    # ========================================================
+
     async def refresh(
         self,
         interaction: discord.Interaction,
     ):
+
         settings = self.manager.db.get_settings(
             self.guild_id
         )
@@ -1939,22 +2872,29 @@ class GroupDashboardView(discord.ui.View):
 
 
 # ============================================================
-# GROUP SETTINGS VIEW
+# GROUP SETTINGS
 # ============================================================
 
-class GroupSettingsView(discord.ui.View):
+class GroupSettingsView(
+    discord.ui.View
+):
 
     def __init__(
         self,
         manager: AIGroupManager,
         guild_id: int,
     ):
+
         super().__init__(
             timeout=300
         )
 
         self.manager = manager
         self.guild_id = guild_id
+
+    # ========================================================
+    # DURATION
+    # ========================================================
 
     @discord.ui.button(
         label="⏱️ مدة الدردشة",
@@ -1966,6 +2906,7 @@ class GroupSettingsView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         current = self.manager.db.get_settings(
             self.guild_id
         )
@@ -1978,6 +2919,10 @@ class GroupSettingsView(discord.ui.View):
             )
         )
 
+    # ========================================================
+    # MODE
+    # ========================================================
+
     @discord.ui.button(
         label="🔄 النمط",
         style=discord.ButtonStyle.secondary,
@@ -1988,6 +2933,7 @@ class GroupSettingsView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         await interaction.response.send_message(
             "اختر نمط المجموعة:",
             view=GroupModeView(
@@ -1997,16 +2943,89 @@ class GroupSettingsView(discord.ui.View):
             ephemeral=True,
         )
 
+    # ========================================================
+    # MEMORY
+    # ========================================================
+
+    @discord.ui.button(
+        label="🧠 الذاكرة",
+        style=discord.ButtonStyle.success,
+        row=1,
+    )
+    async def memory(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+
+        count = self.manager.db.memory_count(
+            self.guild_id
+        )
+
+        embed = discord.Embed(
+            title="🧠 ذاكرة AI Group",
+            description=(
+                f"يوجد حاليًا **{count}** ذكريات محفوظة.\n\n"
+                "الذاكرة محفوظة في قاعدة البيانات "
+                "وتُستخدم لمساعدة البوتات على تذكر "
+                "سياق المحادثات السابقة."
+            ),
+        )
+
+        await interaction.response.send_message(
+            embed=embed,
+            view=MemoryView(
+                self.manager,
+                self.guild_id,
+            ),
+            ephemeral=True,
+        )
+
+    # ========================================================
+    # FACTORY RESET
+    # ========================================================
+
+    @discord.ui.button(
+        label="🏭 إعادة ضبط المصنع",
+        style=discord.ButtonStyle.danger,
+        row=1,
+    )
+    async def factory(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+
+        await interaction.response.send_message(
+            (
+                "⚠️ **هل أنت متأكد؟**\n\n"
+                "سيتم حذف الذاكرة والإحصائيات "
+                "وإرجاع إعدادات القروب والبوتات "
+                "للافتراضي.\n\n"
+                "🔒 **أسماء البوتات لن تتغير.**"
+            ),
+            view=FactoryResetConfirmView(
+                self.manager,
+                self.guild_id,
+            ),
+            ephemeral=True,
+        )
+
+    # ========================================================
+    # BACK
+    # ========================================================
+
     @discord.ui.button(
         label="🔙 رجوع",
         style=discord.ButtonStyle.secondary,
-        row=1,
+        row=2,
     )
     async def back(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         settings = self.manager.db.get_settings(
             self.guild_id
         )
@@ -2022,6 +3041,136 @@ class GroupSettingsView(discord.ui.View):
                 self.manager,
                 self.guild_id,
             ),
+        )
+
+
+# ============================================================
+# MEMORY VIEW
+# ============================================================
+
+class MemoryView(
+    discord.ui.View
+):
+
+    def __init__(
+        self,
+        manager: AIGroupManager,
+        guild_id: int,
+    ):
+
+        super().__init__(
+            timeout=120
+        )
+
+        self.manager = manager
+        self.guild_id = guild_id
+
+    @discord.ui.button(
+        label="🧹 مسح الذاكرة",
+        style=discord.ButtonStyle.danger,
+    )
+    async def clear(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+
+        count = self.manager.db.memory_count(
+            self.guild_id
+        )
+
+        self.manager.db.clear_memory(
+            self.guild_id
+        )
+
+        await interaction.response.send_message(
+            (
+                "🧹 **تم مسح الذاكرة بالكامل.**\n"
+                f"تم حذف **{count}** ذكريات."
+            ),
+            ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="🔙 إغلاق",
+        style=discord.ButtonStyle.secondary,
+    )
+    async def close(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+
+        await interaction.response.edit_message(
+            content="تم إغلاق لوحة الذاكرة.",
+            embed=None,
+            view=None,
+        )
+
+
+# ============================================================
+# FACTORY RESET CONFIRM
+# ============================================================
+
+class FactoryResetConfirmView(
+    discord.ui.View
+):
+
+    def __init__(
+        self,
+        manager: AIGroupManager,
+        guild_id: int,
+    ):
+
+        super().__init__(
+            timeout=60
+        )
+
+        self.manager = manager
+        self.guild_id = guild_id
+
+    @discord.ui.button(
+        label="نعم، إعادة ضبط المصنع",
+        emoji="🏭",
+        style=discord.ButtonStyle.danger,
+    )
+    async def confirm(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+
+        await self.manager.factory_reset(
+            self.guild_id
+        )
+
+        await interaction.response.edit_message(
+            content=(
+                "🏭 **تمت إعادة ضبط المصنع بنجاح.**\n\n"
+                "✅ تم حذف الذاكرة\n"
+                "✅ تم تصفير الإحصائيات\n"
+                "✅ تم إرجاع إعدادات القروب\n"
+                "✅ تم إرجاع إعدادات البوتات\n"
+                "🔒 أسماء البوتات بقيت كما هي\n"
+                "🔴 القروب متوقف بعد إعادة الضبط"
+            ),
+            view=None,
+        )
+
+    @discord.ui.button(
+        label="إلغاء",
+        emoji="❌",
+        style=discord.ButtonStyle.secondary,
+    )
+    async def cancel(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+
+        await interaction.response.edit_message(
+            content="❌ تم إلغاء إعادة ضبط المصنع.",
+            view=None,
         )
 
 
@@ -2049,26 +3198,36 @@ class ChatDurationModal(
         guild_id: int,
         current: int,
     ):
+
         super().__init__()
 
         self.manager = manager
         self.guild_id = guild_id
 
         self.duration.default = (
-            self._format_input(current)
+            self._format_input(
+                current
+            )
         )
 
     @staticmethod
     def _format_input(
         seconds: int,
     ) -> str:
+
         seconds = int(seconds)
 
         if seconds % 3600 == 0:
-            return f"{seconds // 3600}h"
+
+            return (
+                f"{seconds // 3600}h"
+            )
 
         if seconds % 60 == 0:
-            return f"{seconds // 60}m"
+
+            return (
+                f"{seconds // 60}m"
+            )
 
         return f"{seconds}s"
 
@@ -2076,64 +3235,79 @@ class ChatDurationModal(
     def parse_duration(
         value: str,
     ) -> Optional[int]:
-        value = value.strip().lower()
+
+        value = (
+            value
+            .strip()
+            .lower()
+        )
 
         try:
+
             if value.endswith("h"):
+
                 number = float(
                     value[:-1]
                 )
 
-                seconds = int(
+                return int(
                     number * 3600
                 )
 
-            elif value.endswith("m"):
+            if value.endswith("m"):
+
                 number = float(
                     value[:-1]
                 )
 
-                seconds = int(
+                return int(
                     number * 60
                 )
 
-            elif value.endswith("s"):
+            if value.endswith("s"):
+
                 number = float(
                     value[:-1]
                 )
 
-                seconds = int(number)
-
-            else:
-                # بدون وحدة = دقائق
-                number = float(value)
-
-                seconds = int(
-                    number * 60
+                return int(
+                    number
                 )
 
-            return seconds
+            # بدون وحدة = دقائق.
+            number = float(value)
+
+            return int(
+                number * 60
+            )
 
         except Exception:
+
             return None
 
     async def on_submit(
         self,
         interaction: discord.Interaction,
     ):
+
         seconds = self.parse_duration(
-            str(self.duration.value)
+            str(
+                self.duration.value
+            )
         )
 
         if seconds is None:
+
             await interaction.response.send_message(
-                "❌ الصيغة غير صحيحة.\n\n"
-                "أمثلة:\n"
-                "`30m` = 30 دقيقة\n"
-                "`2h` = ساعتان\n"
-                "`12h` = 12 ساعة",
+                (
+                    "❌ الصيغة غير صحيحة.\n\n"
+                    "`30m` = 30 دقيقة\n"
+                    "`2h` = ساعتان\n"
+                    "`12h` = 12 ساعة"
+                ),
                 ephemeral=True,
             )
+
             return
 
         success, text = (
@@ -2144,34 +3318,39 @@ class ChatDurationModal(
         )
 
         if not success:
+
             await interaction.response.send_message(
                 text,
                 ephemeral=True,
             )
+
             return
 
         await interaction.response.send_message(
             (
                 f"{text}\n\n"
-                "👀 البوت التالي سيقرأ الرد "
-                "**3 ثوانٍ**.\n"
-                "🧠 ثم ينتظر **2 ثانية** للتوليد."
+                "👀 قراءة رد البوت السابق: "
+                "**3 ثوانٍ**\n"
+                "🧠 التوليد: **2 ثانية**"
             ),
             ephemeral=True,
         )
 
 
 # ============================================================
-# GROUP MODE VIEW
+# GROUP MODE
 # ============================================================
 
-class GroupModeView(discord.ui.View):
+class GroupModeView(
+    discord.ui.View
+):
 
     def __init__(
         self,
         manager: AIGroupManager,
         guild_id: int,
     ):
+
         super().__init__(
             timeout=120
         )
@@ -2189,6 +3368,7 @@ class GroupModeView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         await self.set_mode(
             interaction,
             "round_robin",
@@ -2204,6 +3384,7 @@ class GroupModeView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         await self.set_mode(
             interaction,
             "random",
@@ -2219,6 +3400,7 @@ class GroupModeView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         await self.set_mode(
             interaction,
             "leader",
@@ -2229,6 +3411,7 @@ class GroupModeView(discord.ui.View):
         interaction: discord.Interaction,
         mode: str,
     ):
+
         await self.manager.set_mode(
             self.guild_id,
             mode,
@@ -2241,7 +3424,10 @@ class GroupModeView(discord.ui.View):
         }
 
         await interaction.response.send_message(
-            f"✅ تم تغيير النمط إلى **{names[mode]}**.",
+            (
+                "✅ تم تغيير النمط إلى "
+                f"**{names[mode]}**."
+            ),
             ephemeral=True,
         )
 
@@ -2250,13 +3436,16 @@ class GroupModeView(discord.ui.View):
 # BOT PICKER
 # ============================================================
 
-class BotPickerView(discord.ui.View):
+class BotPickerView(
+    discord.ui.View
+):
 
     def __init__(
         self,
         manager: AIGroupManager,
         guild_id: int,
     ):
+
         super().__init__(
             timeout=300
         )
@@ -2264,14 +3453,21 @@ class BotPickerView(discord.ui.View):
         self.manager = manager
         self.guild_id = guild_id
 
-        for slot in range(1, MAX_BOTS + 1):
+        for slot in range(
+            1,
+            MAX_BOTS + 1,
+        ):
+
             cfg = manager.db.get_bot(
                 guild_id,
                 slot,
             )
 
             button = discord.ui.Button(
-                label=f"Bot {slot}: {cfg.name[:20]}",
+                label=(
+                    f"Bot {slot}: "
+                    f"{cfg.name[:20]}"
+                ),
                 style=discord.ButtonStyle.secondary,
                 row=(slot - 1) // 2,
             )
@@ -2280,6 +3476,7 @@ class BotPickerView(discord.ui.View):
                 interaction: discord.Interaction,
                 slot=slot,
             ):
+
                 await self.open_bot(
                     interaction,
                     slot,
@@ -2287,13 +3484,16 @@ class BotPickerView(discord.ui.View):
 
             button.callback = callback
 
-            self.add_item(button)
+            self.add_item(
+                button
+            )
 
     async def open_bot(
         self,
         interaction: discord.Interaction,
         slot: int,
     ):
+
         cfg = self.manager.db.get_bot(
             self.guild_id,
             slot,
@@ -2302,6 +3502,13 @@ class BotPickerView(discord.ui.View):
         stats = self.manager.db.get_stats(
             self.guild_id,
             slot,
+        )
+
+        memory_count = (
+            self.manager.db.memory_count(
+                self.guild_id,
+                slot,
+            )
         )
 
         online = (
@@ -2336,10 +3543,10 @@ class BotPickerView(discord.ui.View):
         embed.add_field(
             name="🧠 الذاكرة",
             value=(
-                "مفعلة"
-                if cfg.memory
-                else "متوقفة"
-            ),
+                f"مفعلة • {memory_count}"
+            )
+            if cfg.memory
+            else "متوقفة",
             inline=True,
         )
 
@@ -2353,7 +3560,7 @@ class BotPickerView(discord.ui.View):
         )
 
         embed.add_field(
-            name="🗣️ الشخصية",
+            name="🎭 الشخصية",
             value=(
                 cfg.personality[:500]
                 if cfg.personality
@@ -2373,10 +3580,12 @@ class BotPickerView(discord.ui.View):
 
 
 # ============================================================
-# BOT EDIT VIEW
+# BOT EDIT
 # ============================================================
 
-class BotEditView(discord.ui.View):
+class BotEditView(
+    discord.ui.View
+):
 
     def __init__(
         self,
@@ -2384,6 +3593,7 @@ class BotEditView(discord.ui.View):
         guild_id: int,
         slot: int,
     ):
+
         super().__init__(
             timeout=300
         )
@@ -2391,6 +3601,10 @@ class BotEditView(discord.ui.View):
         self.manager = manager
         self.guild_id = guild_id
         self.slot = slot
+
+    # ========================================================
+    # NAME
+    # ========================================================
 
     @discord.ui.button(
         label="تغيير الاسم",
@@ -2403,6 +3617,7 @@ class BotEditView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         cfg = self.manager.db.get_bot(
             self.guild_id,
             self.slot,
@@ -2417,6 +3632,10 @@ class BotEditView(discord.ui.View):
             )
         )
 
+    # ========================================================
+    # PERSONALITY
+    # ========================================================
+
     @discord.ui.button(
         label="الشخصية",
         emoji="🎭",
@@ -2428,6 +3647,7 @@ class BotEditView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         cfg = self.manager.db.get_bot(
             self.guild_id,
             self.slot,
@@ -2442,6 +3662,10 @@ class BotEditView(discord.ui.View):
             )
         )
 
+    # ========================================================
+    # POWER
+    # ========================================================
+
     @discord.ui.button(
         label="القوة",
         emoji="💪",
@@ -2453,6 +3677,7 @@ class BotEditView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         cfg = self.manager.db.get_bot(
             self.guild_id,
             self.slot,
@@ -2467,17 +3692,90 @@ class BotEditView(discord.ui.View):
             )
         )
 
+    # ========================================================
+    # MEMORY
+    # ========================================================
+
+    @discord.ui.button(
+        label="🧠 ذاكرة",
+        style=discord.ButtonStyle.success,
+        row=1,
+    )
+    async def memory(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+
+        cfg = self.manager.db.get_bot(
+            self.guild_id,
+            self.slot,
+        )
+
+        cfg.memory = not cfg.memory
+
+        self.manager.db.save_bot(
+            cfg
+        )
+
+        await interaction.response.send_message(
+            (
+                "🧠 ذاكرة البوت **مفعلة**."
+                if cfg.memory
+                else "🧠 ذاكرة البوت **متوقفة**."
+            ),
+            ephemeral=True,
+        )
+
+    # ========================================================
+    # CLEAR BOT MEMORY
+    # ========================================================
+
+    @discord.ui.button(
+        label="🧹 مسح الذاكرة",
+        style=discord.ButtonStyle.danger,
+        row=1,
+    )
+    async def clear_memory(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+
+        count = self.manager.db.memory_count(
+            self.guild_id,
+            self.slot,
+        )
+
+        self.manager.db.clear_memory(
+            self.guild_id,
+            self.slot,
+        )
+
+        await interaction.response.send_message(
+            (
+                f"🧹 تم مسح ذاكرة Bot {self.slot}.\n"
+                f"تم حذف **{count}** ذكريات."
+            ),
+            ephemeral=True,
+        )
+
+    # ========================================================
+    # ENABLE
+    # ========================================================
+
     @discord.ui.button(
         label="تفعيل / إيقاف",
         emoji="⚡",
-        style=discord.ButtonStyle.success,
-        row=1,
+        style=discord.ButtonStyle.secondary,
+        row=2,
     )
     async def enabled(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         cfg = self.manager.db.get_bot(
             self.guild_id,
             self.slot,
@@ -2485,7 +3783,9 @@ class BotEditView(discord.ui.View):
 
         cfg.enabled = not cfg.enabled
 
-        self.manager.db.save_bot(cfg)
+        self.manager.db.save_bot(
+            cfg
+        )
 
         await interaction.response.send_message(
             (
@@ -2496,16 +3796,21 @@ class BotEditView(discord.ui.View):
             ephemeral=True,
         )
 
+    # ========================================================
+    # BACK
+    # ========================================================
+
     @discord.ui.button(
         label="🔙 رجوع",
         style=discord.ButtonStyle.secondary,
-        row=1,
+        row=2,
     )
     async def back(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+
         embed = discord.Embed(
             title="🤖 بوتات AI Group",
             description=(
@@ -2513,14 +3818,12 @@ class BotEditView(discord.ui.View):
             ),
         )
 
-        view = BotPickerView(
-            self.manager,
-            self.guild_id,
-        )
-
         await interaction.response.edit_message(
             embed=embed,
-            view=view,
+            view=BotPickerView(
+                self.manager,
+                self.guild_id,
+            ),
         )
 
 
@@ -2546,28 +3849,36 @@ class BotNameModal(
         slot: int,
         current_name: str,
     ):
+
         super().__init__()
 
         self.manager = manager
         self.guild_id = guild_id
         self.slot = slot
 
-        self.name_input.default = current_name
+        self.name_input.default = (
+            current_name
+        )
 
     async def on_submit(
         self,
         interaction: discord.Interaction,
     ):
+
         new_name = (
-            str(self.name_input.value)
+            str(
+                self.name_input.value
+            )
             .strip()
         )
 
         if not new_name:
+
             await interaction.response.send_message(
                 "❌ الاسم لا يمكن أن يكون فارغًا.",
                 ephemeral=True,
             )
+
             return
 
         cfg = self.manager.db.get_bot(
@@ -2583,8 +3894,12 @@ class BotNameModal(
         )
 
         if success:
+
             cfg.name = new_name
-            self.manager.db.save_bot(cfg)
+
+            self.manager.db.save_bot(
+                cfg
+            )
 
         await interaction.response.send_message(
             text,
@@ -2593,7 +3908,7 @@ class BotNameModal(
 
 
 # ============================================================
-# BOT PERSONALITY MODAL
+# PERSONALITY MODAL
 # ============================================================
 
 class BotPersonalityModal(
@@ -2615,28 +3930,37 @@ class BotPersonalityModal(
         slot: int,
         current: str,
     ):
+
         super().__init__()
 
         self.manager = manager
         self.guild_id = guild_id
         self.slot = slot
 
-        self.personality_input.default = current
+        self.personality_input.default = (
+            current
+        )
 
     async def on_submit(
         self,
         interaction: discord.Interaction,
     ):
+
         cfg = self.manager.db.get_bot(
             self.guild_id,
             self.slot,
         )
 
-        cfg.personality = str(
-            self.personality_input.value
-        ).strip()
+        cfg.personality = (
+            str(
+                self.personality_input.value
+            )
+            .strip()
+        )
 
-        self.manager.db.save_bot(cfg)
+        self.manager.db.save_bot(
+            cfg
+        )
 
         await interaction.response.send_message(
             "✅ تم حفظ شخصية البوت.",
@@ -2645,7 +3969,7 @@ class BotPersonalityModal(
 
 
 # ============================================================
-# BOT POWER MODAL
+# POWER MODAL
 # ============================================================
 
 class BotPowerModal(
@@ -2667,6 +3991,7 @@ class BotPowerModal(
         slot: int,
         current: int,
     ):
+
         super().__init__()
 
         self.manager = manager
@@ -2681,22 +4006,31 @@ class BotPowerModal(
         self,
         interaction: discord.Interaction,
     ):
+
         try:
+
             power = int(
-                str(self.power_input.value)
+                str(
+                    self.power_input.value
+                )
             )
+
         except Exception:
+
             await interaction.response.send_message(
                 "❌ اكتب رقمًا من 1 إلى 100.",
                 ephemeral=True,
             )
+
             return
 
         if not 1 <= power <= 100:
+
             await interaction.response.send_message(
                 "❌ القوة يجب أن تكون بين 1 و100.",
                 ephemeral=True,
             )
+
             return
 
         cfg = self.manager.db.get_bot(
@@ -2706,10 +4040,15 @@ class BotPowerModal(
 
         cfg.power = power
 
-        self.manager.db.save_bot(cfg)
+        self.manager.db.save_bot(
+            cfg
+        )
 
         await interaction.response.send_message(
-            f"✅ تم ضبط قوة البوت على **{power}/100**.",
+            (
+                "✅ تم ضبط قوة البوت على "
+                f"**{power}/100**."
+            ),
             ephemeral=True,
         )
 
