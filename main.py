@@ -1,5 +1,7 @@
 import os
 import re
+import asyncio
+import random
 import traceback
 
 import discord
@@ -19,7 +21,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 PRIMARY_AI_PROVIDER = os.getenv(
     "PRIMARY_AI_PROVIDER",
     "google"
-)
+).lower().strip()
 
 GOOGLE_MODEL = os.getenv(
     "GOOGLE_MODEL",
@@ -55,12 +57,83 @@ AI_MODES = {
 }
 
 
+# ==========================================================
+# REPLY TYPES
+# ==========================================================
+
 REPLY_TYPES = {
     "mention",
-    "direct",
     "channel",
+    "direct",
     "auto",
-    "bot_chat"
+    "bot_chat",
+}
+
+
+# ==========================================================
+# CHARACTER TYPES
+# ==========================================================
+
+CHARACTER_TYPES = {
+    "normal": {
+        "name": "عادي",
+        "description": "شخصية متوازنة وطبيعية."
+    },
+
+    "calm": {
+        "name": "هادئ",
+        "description": "هادئ، متزن، ولا يتسرع في الرد."
+    },
+
+    "smart": {
+        "name": "ذكي",
+        "description": "تحليلي، دقيق، ويشرح الأمور بوضوح."
+    },
+
+    "funny": {
+        "name": "مرح",
+        "description": "مرح ويحب إضافة لمسات خفيفة ومضحكة."
+    },
+
+    "friendly": {
+        "name": "ودود",
+        "description": "لطيف، متعاون، ومريح في الحوار."
+    },
+
+    "formal": {
+        "name": "رسمي",
+        "description": "رسمي، مرتب، وواضح في كلامه."
+    },
+
+    "energetic": {
+        "name": "حماسي",
+        "description": "نشط ومتحمس ويجعل الحوار أكثر تفاعلًا."
+    },
+
+    "rude": {
+        "name": "غير مهذب",
+        "description": "مباشر وصريح وقليل المجاملة، مع تجنب الإهانات المؤذية."
+    },
+
+    "mischievous": {
+        "name": "مشاغب",
+        "description": "مشاغب ويميل للمزاح والمقالب الكلامية الخفيفة."
+    },
+
+    "curious": {
+        "name": "فضولي",
+        "description": "فضولي ويحب طرح الأسئلة واستكشاف التفاصيل."
+    },
+
+    "creative": {
+        "name": "إبداعي",
+        "description": "خيالي ويقدم أفكارًا وطرقًا غير تقليدية."
+    },
+
+    "professional": {
+        "name": "احترافي",
+        "description": "دقيق ومنظم ويركز على الحلول العملية."
+    },
 }
 
 
@@ -163,6 +236,20 @@ ai = AIEngine(db)
 
 
 # ==========================================================
+# PERFORMANCE / REQUEST CONTROL
+# ==========================================================
+
+AI_SEMAPHORE = asyncio.Semaphore(3)
+
+ACTIVE_REQUESTS = set()
+
+AI_TIMEOUT = 35
+
+MIN_TYPING_TIME = 3.0
+MAX_TYPING_TIME = 5.0
+
+
+# ==========================================================
 # BOT
 # ==========================================================
 
@@ -205,9 +292,21 @@ def row_to_dict(row):
         return None
 
     if isinstance(row, dict):
-        return row
+        return dict(row)
 
-    return dict(row)
+    try:
+        return dict(row)
+
+    except Exception:
+
+        try:
+            return {
+                key: row[key]
+                for key in row.keys()
+            }
+
+        except Exception:
+            return None
 
 
 def get_config(guild_id):
@@ -242,11 +341,6 @@ def get_active_character(
             guild_id
         )
     )
-
-
-def as_bool(value):
-
-    return bool(value)
 
 
 def normalize_text(text):
@@ -292,14 +386,38 @@ def split_message(
     if not text:
         return []
 
-    return [
-        text[i:i + limit]
-        for i in range(
+    parts = []
+
+    while len(text) > limit:
+
+        cut = text.rfind(
+            "\n",
             0,
-            len(text),
             limit
         )
-    ]
+
+        if cut < 500:
+
+            cut = text.rfind(
+                " ",
+                0,
+                limit
+            )
+
+        if cut < 500:
+
+            cut = limit
+
+        parts.append(
+            text[:cut].strip()
+        )
+
+        text = text[cut:].strip()
+
+    if text:
+        parts.append(text)
+
+    return parts
 
 
 def normalize_channel_id(
@@ -352,9 +470,8 @@ def is_directed_to_bot(
     ).lower()
 
     return (
-        content.startswith(
-            bot_name
-        )
+        bool(bot_name)
+        and content.startswith(bot_name)
     )
 
 
@@ -527,10 +644,6 @@ def security_check(
             "المستخدم ليس عضوًا صالحًا في السيرفر."
         )
 
-    # ------------------------------------------------------
-    # Server owner
-    # ------------------------------------------------------
-
     if (
         member.guild.owner_id
         == member.id
@@ -541,10 +654,6 @@ def security_check(
             "server_owner"
         )
 
-    # ------------------------------------------------------
-    # Top 3 roles
-    # ------------------------------------------------------
-
     if not member_has_top_three_role(
         member
     ):
@@ -553,10 +662,6 @@ def security_check(
             False,
             "هذا الإجراء حساس ومسموح فقط لأعلى 3 رتب في السيرفر."
         )
-
-    # ------------------------------------------------------
-    # Discord permissions
-    # ------------------------------------------------------
 
     if action == "manage_roles":
 
@@ -615,6 +720,37 @@ def security_check(
     return (
         True,
         "authorized"
+    )
+
+
+# ==========================================================
+# CHARACTER SECURITY
+# ==========================================================
+
+def owns_character(
+    interaction,
+    character
+):
+
+    if not interaction.guild:
+        return False
+
+    if not character:
+        return False
+
+    owner_id = character.get(
+        "created_by"
+    )
+
+    try:
+        owner_id = int(owner_id)
+
+    except Exception:
+        return False
+
+    return (
+        owner_id
+        == interaction.user.id
     )
 
 
@@ -719,24 +855,31 @@ async def generate_chat_reply(
         f"🧠 Model     : {model}"
     )
 
-    response = await ai.generate(
+    async with AI_SEMAPHORE:
 
-        guild_id=message.guild.id,
+        response = await asyncio.wait_for(
 
-        channel_id=message.channel.id,
+            ai.generate(
 
-        user_id=message.author.id,
+                guild_id=message.guild.id,
 
-        character_name=character_name,
+                channel_id=message.channel.id,
 
-        prompt=user_text,
+                user_id=message.author.id,
 
-        mode=ai_mode,
+                character_name=character_name,
 
-        provider=provider,
+                prompt=user_text,
 
-        model=model,
-    )
+                mode=ai_mode,
+
+                provider=provider,
+
+                model=model,
+            ),
+
+            timeout=AI_TIMEOUT
+        )
 
     return response
 
@@ -774,30 +917,199 @@ async def generate_dm_reply(
     )
 
     print(
-        f"🤖 Provider  : google"
+        "🤖 Provider  : google"
     )
 
     print(
         f"🧠 Model     : {GOOGLE_MODEL}"
     )
 
-    response = await ai.generate(
+    async with AI_SEMAPHORE:
 
-        guild_id=db.DM_GUILD_ID,
+        response = await asyncio.wait_for(
 
-        channel_id=message.channel.id,
+            ai.generate(
 
-        user_id=message.author.id,
+                guild_id=db.DM_GUILD_ID,
 
-        character_name=db.DM_CHARACTER_NAME,
+                channel_id=message.channel.id,
 
-        prompt=user_text,
+                user_id=message.author.id,
 
-        mode="friendly",
+                character_name=db.DM_CHARACTER_NAME,
 
-        provider="google",
+                prompt=user_text,
 
-        model=GOOGLE_MODEL,
+                mode="friendly",
+
+                provider="google",
+
+                model=GOOGLE_MODEL,
+            ),
+
+            timeout=AI_TIMEOUT
+        )
+
+    return response
+
+
+# ==========================================================
+# AI WAITING MESSAGE
+# ==========================================================
+
+async def generate_with_typing_message(
+    message,
+    generator,
+    character_name
+):
+
+    started_at = asyncio.get_running_loop().time()
+
+    waiting_message = None
+
+    try:
+
+        waiting_message = await message.reply(
+            f"**{character_name} يكتب...**",
+            mention_author=False
+        )
+
+    except discord.HTTPException as e:
+
+        print(
+            f"⚠️ Could not create typing message: {e}"
+        )
+
+    generation_task = asyncio.create_task(
+        generator()
+    )
+
+    minimum_time = random.uniform(
+        MIN_TYPING_TIME,
+        MAX_TYPING_TIME
+    )
+
+    try:
+
+        if waiting_message:
+
+            try:
+
+                response, _ = await asyncio.gather(
+
+                    generation_task,
+
+                    asyncio.sleep(
+                        minimum_time
+                    )
+                )
+
+            except Exception:
+
+                await asyncio.sleep(
+                    max(
+                        0,
+                        minimum_time
+                        - (
+                            asyncio.get_running_loop().time()
+                            - started_at
+                        )
+                    )
+                )
+
+                raise
+
+        else:
+
+            response = await generation_task
+
+    except asyncio.TimeoutError:
+
+        response = (
+            "⏱️ عذرًا، استغرق توليد الرد وقتًا أطول من المتوقع. "
+            "حاول مرة ثانية."
+        )
+
+    except Exception as e:
+
+        print(
+            f"❌ AI request failed: {e}"
+        )
+
+        traceback.print_exc()
+
+        response = (
+            "⚠️ حصل خطأ مؤقت أثناء تجهيز الرد. "
+            "جرّب مرة ثانية بعد قليل."
+        )
+
+    if not response:
+
+        response = (
+            "⚠️ لم يتم إنشاء رد."
+        )
+
+    response = str(
+        response
+    ).strip()
+
+    parts = split_message(
+        response
+    )
+
+    if not parts:
+
+        parts = [
+            "⚠️ لم يتم إنشاء رد."
+        ]
+
+    if waiting_message:
+
+        try:
+
+            await waiting_message.edit(
+                content=parts[0]
+            )
+
+            for part in parts[1:]:
+
+                try:
+
+                    await message.channel.send(
+                        part
+                    )
+
+                except discord.HTTPException as e:
+
+                    print(
+                        f"❌ Failed sending extra response part: {e}"
+                    )
+
+        except discord.HTTPException as e:
+
+            print(
+                f"❌ Failed editing waiting message: {e}"
+            )
+
+            await send_ai_response(
+                message,
+                response
+            )
+
+    else:
+
+        await send_ai_response(
+            message,
+            response
+        )
+
+    elapsed = (
+        asyncio.get_running_loop().time()
+        - started_at
+    )
+
+    print(
+        f"⏱️ AI response completed in {elapsed:.2f}s"
     )
 
     return response
@@ -941,21 +1253,16 @@ async def ai_setup(
 
 
 # ==========================================================
-# /character_create
+# /ai_config
+# TOP 3 ROLES ONLY
 # ==========================================================
 
 @bot.tree.command(
-    name="character_create",
-    description="إنشاء شخصية جديدة"
+    name="ai_config",
+    description="عرض إعدادات MyAI"
 )
-@app_commands.describe(
-    name="اسم الشخصية",
-    personality="وصف الشخصية"
-)
-async def character_create(
-    interaction: discord.Interaction,
-    name: str,
-    personality: str
+async def ai_config(
+    interaction: discord.Interaction
 ):
 
     if not interaction.guild:
@@ -967,12 +1274,185 @@ async def character_create(
 
         return
 
-    if not can_manage_ai(
-        interaction
+    if not member_has_top_three_role(
+        interaction.user
     ):
 
         await interaction.response.send_message(
-            "🛡️ ليس لديك صلاحية إنشاء شخصية.",
+            "🛡️ هذا الأمر متاح فقط لأعضاء أعلى 3 رتب في السيرفر.",
+            ephemeral=True
+        )
+
+        return
+
+    config = get_config(
+        interaction.guild.id
+    )
+
+    character = (
+        config.get("character_name")
+        or "غير محددة"
+    )
+
+    channel_id = config.get(
+        "channel_id"
+    )
+
+    channel = (
+        f"<#{channel_id}>"
+        if channel_id
+        else "كل القنوات"
+    )
+
+    mode = (
+        config.get("mode")
+        or "normal"
+    )
+
+    mode_description = (
+        AI_MODES.get(
+            mode,
+            AI_MODES["normal"]
+        )["description"]
+    )
+
+    enabled = (
+        "🟢 مفعّل"
+        if config.get("enabled")
+        else "🔴 معطّل"
+    )
+
+    embed = discord.Embed(
+        title="🤖 MyAI Configuration",
+        description=(
+            "إعدادات نظام الذكاء الاصطناعي "
+            "لهذا السيرفر."
+        )
+    )
+
+    embed.add_field(
+        name="الحالة",
+        value=enabled,
+        inline=True
+    )
+
+    embed.add_field(
+        name="الشخصية",
+        value=f"`{character}`",
+        inline=True
+    )
+
+    embed.add_field(
+        name="الوضع",
+        value=(
+            f"`{mode}`\n"
+            f"{mode_description}"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="نوع الرد",
+        value=f"`{config.get('reply_type', 'mention')}`",
+        inline=True
+    )
+
+    embed.add_field(
+        name="القناة",
+        value=channel,
+        inline=True
+    )
+
+    embed.add_field(
+        name="Provider",
+        value=f"`{config.get('provider', PRIMARY_AI_PROVIDER)}`",
+        inline=True
+    )
+
+    embed.add_field(
+        name="Model",
+        value=f"`{config.get('model', GOOGLE_MODEL)}`",
+        inline=False
+    )
+
+    embed.set_footer(
+        text="🛡️ ai_config متاح فقط لأعلى 3 رتب."
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        ephemeral=True
+    )
+
+
+# ==========================================================
+# CHARACTER TYPE CHOICES
+# ==========================================================
+
+CHARACTER_CHOICES = [
+    app_commands.Choice(
+        name=value["name"],
+        value=key
+    )
+    for key, value in CHARACTER_TYPES.items()
+]
+
+
+# ==========================================================
+# /character_create
+# ALL MEMBERS
+# ==========================================================
+
+@bot.tree.command(
+    name="character_create",
+    description="إنشاء شخصية MyAI جديدة"
+)
+@app_commands.describe(
+    name="اسم الشخصية",
+    character_type="نوع الشخصية",
+    custom_instructions="تعليمات مخصصة للشخصية",
+    speaking_style="كيف تريد أن يتكلم البوت؟"
+)
+@app_commands.choices(
+    character_type=CHARACTER_CHOICES
+)
+async def character_create(
+    interaction: discord.Interaction,
+    name: str,
+    character_type: app_commands.Choice[str],
+    custom_instructions: str,
+    speaking_style: str
+):
+
+    if not interaction.guild:
+
+        await interaction.response.send_message(
+            "❌ هذا الأمر يعمل داخل السيرفر فقط.",
+            ephemeral=True
+        )
+
+        return
+
+    name = normalize_text(
+        name
+    )
+
+    custom_instructions = str(
+        custom_instructions or ""
+    ).strip()
+
+    speaking_style = str(
+        speaking_style or ""
+    ).strip()
+
+    type_data = CHARACTER_TYPES.get(
+        character_type.value
+    )
+
+    if not type_data:
+
+        await interaction.response.send_message(
+            "❌ نوع الشخصية غير صالح.",
             ephemeral=True
         )
 
@@ -981,20 +1461,234 @@ async def character_create(
     try:
 
         character = db.create_character(
+
             guild_id=interaction.guild.id,
+
             name=name,
-            personality=personality,
+
+            personality=type_data["description"],
+
+            character_type=character_type.value,
+
+            custom_instructions=custom_instructions,
+
+            speaking_style=speaking_style,
+
             provider="google",
+
             model=GOOGLE_MODEL,
+
             created_by=interaction.user.id
         )
 
         await interaction.response.send_message(
-            f"✅ تم إنشاء الشخصية **{character['name']}**.",
+            "✅ **تم إنشاء الشخصية بنجاح!**\n\n"
+            f"🎭 الاسم: **{character['name']}**\n"
+            f"🧩 النوع: **{type_data['name']}**\n"
+            f"👤 المالك: {interaction.user.mention}\n\n"
+            "يمكنك تعديلها لاحقًا باستخدام "
+            "`/character_edit`.",
             ephemeral=True
         )
 
     except Exception as e:
+
+        print(
+            f"❌ Character create error: {e}"
+        )
+
+        await interaction.response.send_message(
+            f"❌ {e}",
+            ephemeral=True
+        )
+
+
+# ==========================================================
+# /character_edit
+# OWNER ONLY
+# ==========================================================
+
+@bot.tree.command(
+    name="character_edit",
+    description="تعديل شخصيتك فقط"
+)
+@app_commands.describe(
+    character="اسم الشخصية التي تملكها",
+    character_type="نوع الشخصية الجديد",
+    custom_instructions="التعليمات المخصصة الجديدة",
+    speaking_style="أسلوب الكلام الجديد"
+)
+@app_commands.choices(
+    character_type=CHARACTER_CHOICES
+)
+async def character_edit(
+    interaction: discord.Interaction,
+    character: str,
+    character_type: app_commands.Choice[str] = None,
+    custom_instructions: str = None,
+    speaking_style: str = None
+):
+
+    if not interaction.guild:
+
+        await interaction.response.send_message(
+            "❌ هذا الأمر يعمل داخل السيرفر فقط.",
+            ephemeral=True
+        )
+
+        return
+
+    character_data = get_character(
+        interaction.guild.id,
+        character
+    )
+
+    if not character_data:
+
+        await interaction.response.send_message(
+            "❌ الشخصية غير موجودة.",
+            ephemeral=True
+        )
+
+        return
+
+    if not owns_character(
+        interaction,
+        character_data
+    ):
+
+        await interaction.response.send_message(
+            "🔒 لا يمكنك تعديل شخصية شخص آخر.",
+            ephemeral=True
+        )
+
+        return
+
+    if character_type is None and custom_instructions is None and speaking_style is None:
+
+        await interaction.response.send_message(
+            "ℹ️ لم ترسل أي تغيير.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        updated = db.update_character(
+
+            guild_id=interaction.guild.id,
+
+            name=character,
+
+            character_type=(
+                character_type.value
+                if character_type
+                else None
+            ),
+
+            custom_instructions=(
+                custom_instructions
+                if custom_instructions is not None
+                else None
+            ),
+
+            speaking_style=(
+                speaking_style
+                if speaking_style is not None
+                else None
+            ),
+
+            editor_id=interaction.user.id
+        )
+
+        await interaction.response.send_message(
+            f"✅ تم تحديث الشخصية **{updated['name']}**.",
+            ephemeral=True
+        )
+
+    except Exception as e:
+
+        print(
+            f"❌ Character edit error: {e}"
+        )
+
+        await interaction.response.send_message(
+            f"❌ {e}",
+            ephemeral=True
+        )
+
+
+# ==========================================================
+# /character_delete
+# OWNER ONLY
+# ==========================================================
+
+@bot.tree.command(
+    name="character_delete",
+    description="حذف شخصيتك فقط"
+)
+@app_commands.describe(
+    character="اسم الشخصية التي تريد حذفها"
+)
+async def character_delete(
+    interaction: discord.Interaction,
+    character: str
+):
+
+    if not interaction.guild:
+
+        await interaction.response.send_message(
+            "❌ هذا الأمر يعمل داخل السيرفر فقط.",
+            ephemeral=True
+        )
+
+        return
+
+    character_data = get_character(
+        interaction.guild.id,
+        character
+    )
+
+    if not character_data:
+
+        await interaction.response.send_message(
+            "❌ الشخصية غير موجودة.",
+            ephemeral=True
+        )
+
+        return
+
+    if not owns_character(
+        interaction,
+        character_data
+    ):
+
+        await interaction.response.send_message(
+            "🔒 لا يمكنك حذف شخصية شخص آخر.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        db.delete_character(
+            guild_id=interaction.guild.id,
+            name=character,
+            requester_id=interaction.user.id
+        )
+
+        await interaction.response.send_message(
+            f"🗑️ تم حذف الشخصية **{character}**.",
+            ephemeral=True
+        )
+
+    except Exception as e:
+
+        print(
+            f"❌ Character delete error: {e}"
+        )
 
         await interaction.response.send_message(
             f"❌ {e}",
@@ -1043,8 +1737,39 @@ async def character_list(
         start=1
     ):
 
+        item = row_to_dict(
+            character
+        )
+
+        if not item:
+            continue
+
+        char_type = (
+            item.get("character_type")
+            or "normal"
+        )
+
+        type_name = (
+            CHARACTER_TYPES.get(
+                char_type,
+                CHARACTER_TYPES["normal"]
+            )["name"]
+        )
+
+        owner_id = item.get(
+            "created_by"
+        )
+
+        owner = (
+            f"<@{owner_id}>"
+            if owner_id and int(owner_id) != 0
+            else "System"
+        )
+
         lines.append(
-            f"`{index}` • **{character['name']}**"
+            f"`{index}` • **{item['name']}** "
+            f"• {type_name} "
+            f"• 👤 {owner}"
         )
 
     await interaction.response.send_message(
@@ -1056,11 +1781,12 @@ async def character_list(
 
 # ==========================================================
 # /character_use
+# MANAGEMENT ONLY
 # ==========================================================
 
 @bot.tree.command(
     name="character_use",
-    description="اختيار شخصية MyAI"
+    description="اختيار شخصية MyAI للسيرفر"
 )
 @app_commands.describe(
     character="اسم الشخصية"
@@ -1103,6 +1829,10 @@ async def character_use(
         )
 
     except Exception as e:
+
+        print(
+            f"❌ Character use error: {e}"
+        )
 
         await interaction.response.send_message(
             f"❌ {e}",
@@ -1281,6 +2011,27 @@ async def ai_dm(
 
 
 # ==========================================================
+# MESSAGE REQUEST KEY
+# ==========================================================
+
+def get_request_key(
+    message
+):
+
+    guild_id = (
+        message.guild.id
+        if message.guild
+        else 0
+    )
+
+    return (
+        guild_id,
+        message.channel.id,
+        message.author.id
+    )
+
+
+# ==========================================================
 # ON MESSAGE
 # ==========================================================
 
@@ -1329,7 +2080,7 @@ async def on_message(
         )
 
         print(
-            f"📍 Channel    : DM"
+            "📍 Channel    : DM"
         )
 
     print(
@@ -1353,6 +2104,18 @@ async def on_message(
         return
 
     # ------------------------------------------------------
+    # Ignore bots
+    # ------------------------------------------------------
+
+    if message.author.bot:
+
+        print(
+            "⏭️ Ignored another bot"
+        )
+
+        return
+
+    # ------------------------------------------------------
     # DM
     # ------------------------------------------------------
 
@@ -1361,14 +2124,6 @@ async def on_message(
         print(
             "📩 Direct Message received"
         )
-
-        if message.author.bot:
-
-            print(
-                "⏭️ Ignored bot DM"
-            )
-
-            return
 
         try:
 
@@ -1390,44 +2145,40 @@ async def on_message(
 
             return
 
-        print(
-            "🟢 AI DM enabled for this user"
+        key = get_request_key(
+            message
+        )
+
+        if key in ACTIVE_REQUESTS:
+
+            print(
+                "⏭️ Existing AI request for this user"
+            )
+
+            return
+
+        ACTIVE_REQUESTS.add(
+            key
         )
 
         try:
 
-            response = await generate_dm_reply(
-                message
-            )
+            await generate_with_typing_message(
 
-            await send_ai_response(
                 message,
-                response
+
+                lambda: generate_dm_reply(
+                    message
+                ),
+
+                db.DM_CHARACTER_NAME
             )
 
-            print(
-                "✅ DM AI response sent"
+        finally:
+
+            ACTIVE_REQUESTS.discard(
+                key
             )
-
-        except Exception as e:
-
-            print(
-                f"❌ DM AI error: {e}"
-            )
-
-            traceback.print_exc()
-
-        return
-
-    # ------------------------------------------------------
-    # Ignore other bots
-    # ------------------------------------------------------
-
-    if message.author.bot:
-
-        print(
-            "⏭️ Ignored another bot"
-        )
 
         return
 
@@ -1555,24 +2306,16 @@ async def on_message(
             return
 
     # ------------------------------------------------------
-    # CHANNEL
+    # CHANNEL / AUTO / BOT CHAT
     # ------------------------------------------------------
 
     elif reply_type == "channel":
 
         pass
 
-    # ------------------------------------------------------
-    # AUTO
-    # ------------------------------------------------------
-
     elif reply_type == "auto":
 
         pass
-
-    # ------------------------------------------------------
-    # BOT CHAT
-    # ------------------------------------------------------
 
     elif reply_type == "bot_chat":
 
@@ -1582,29 +2325,46 @@ async def on_message(
         f"🎯 Selected mode: {reply_type}"
     )
 
-    try:
-
-        response = await generate_chat_reply(
-            message,
-            config
-        )
-
-        await send_ai_response(
-            message,
-            response
-        )
-
-    except Exception as e:
-
-        print(
-            f"❌ AI generation error: {e}"
-        )
-
-        traceback.print_exc()
-
-    await bot.process_commands(
+    key = get_request_key(
         message
     )
+
+    if key in ACTIVE_REQUESTS:
+
+        print(
+            "⏭️ Duplicate active AI request ignored"
+        )
+
+        return
+
+    ACTIVE_REQUESTS.add(
+        key
+    )
+
+    try:
+
+        character_name = (
+            config.get("character_name")
+            or "مساعد السيرفر جيميناي"
+        )
+
+        await generate_with_typing_message(
+
+            message,
+
+            lambda: generate_chat_reply(
+                message,
+                config
+            ),
+
+            character_name
+        )
+
+    finally:
+
+        ACTIVE_REQUESTS.discard(
+            key
+        )
 
 
 # ==========================================================
@@ -1664,6 +2424,22 @@ async def on_ready():
     )
 
     print(
+        "🎭 Character system | ENABLED"
+    )
+
+    print(
+        "✏️ Character ownership | ENABLED"
+    )
+
+    print(
+        "🔒 Owner-only character editing | ENABLED"
+    )
+
+    print(
+        "🗑️ Owner-only character deletion | ENABLED"
+    )
+
+    print(
         "🤖 Bot-to-Bot mode available."
     )
 
@@ -1673,6 +2449,15 @@ async def on_ready():
 
     print(
         "🔐 Sensitive requests | TOP 3 ROLES"
+    )
+
+    print(
+        "⚡ AI request protection | ENABLED"
+    )
+
+    print(
+        "⏱️ AI timeout | "
+        f"{AI_TIMEOUT}s"
     )
 
     print(
@@ -1751,4 +2536,4 @@ if __name__ == "__main__":
 
     bot.run(
         TOKEN
-            )
+)
