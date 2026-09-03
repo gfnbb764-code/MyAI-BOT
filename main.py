@@ -191,6 +191,9 @@ ACTIVE_REQUESTS = set()
 # يتم تهيئته داخل setup_hook
 ai_group = None
 
+# مهمة تشغيل البوتات الثانوية في الخلفية
+SECONDARY_STARTUP_TASK = None
+
 
 # ============================================================
 # GENERAL HELPERS
@@ -609,7 +612,6 @@ def clean_mentions(
         return ""
 
     if bot.user:
-
         content = content.replace(
             f"<@{bot.user.id}>",
             ""
@@ -630,7 +632,6 @@ def clean_mentions(
 async def get_referenced_message(
     message: discord.Message
 ):
-
     reference = message.reference
 
     if reference is None:
@@ -658,13 +659,10 @@ async def get_referenced_message(
         return None
 
     try:
-
         return await message.channel.fetch_message(
             message_id
         )
-
     except Exception:
-
         return None
 
 
@@ -672,7 +670,6 @@ async def build_message_context(
     message: discord.Message,
     prompt: str
 ):
-
     context_parts = []
 
     sender_name = (
@@ -720,7 +717,6 @@ async def build_message_context(
         )
 
     if mentioned_users:
-
         context_parts.append(
             "المستخدمون المذكورون في الرسالة: "
             + ", ".join(
@@ -755,7 +751,6 @@ async def build_message_context(
         ).strip()
 
         if len(referenced_content) > 3000:
-
             referenced_content = (
                 referenced_content[:3000]
                 + "..."
@@ -805,7 +800,6 @@ def split_message(
     text: str,
     limit: int = 1900
 ):
-
     if not text:
         return []
 
@@ -823,7 +817,6 @@ def split_message(
         )
 
         if split_at <= 0:
-
             split_at = text.rfind(
                 " ",
                 0,
@@ -831,7 +824,6 @@ def split_message(
             )
 
         if split_at <= 0:
-
             split_at = limit
 
         chunks.append(
@@ -851,13 +843,11 @@ def split_message(
 def normalize_channel_id(
     value
 ):
-
     if value is None:
         return None
 
     try:
         return int(value)
-
     except Exception:
         return None
 
@@ -866,7 +856,6 @@ def channel_matches(
     message: discord.Message,
     channel_id
 ):
-
     channel_id = normalize_channel_id(
         channel_id
     )
@@ -883,7 +872,6 @@ def channel_matches(
 def is_directed_to_bot(
     message: discord.Message
 ):
-
     if not bot.user:
         return False
 
@@ -911,7 +899,6 @@ def is_directed_to_bot(
 def has_broad_management(
     member: discord.Member
 ):
-
     if member.guild.owner_id == member.id:
         return True
 
@@ -928,7 +915,6 @@ def has_broad_management(
 def get_top_three_roles(
     guild: discord.Guild
 ):
-
     roles = [
         role
         for role in guild.roles
@@ -947,7 +933,6 @@ def get_top_three_roles(
 def can_use_ai_dashboard(
     member: discord.Member
 ):
-
     top_roles = get_top_three_roles(
         member.guild
     )
@@ -961,7 +946,6 @@ def can_use_ai_dashboard(
 def security_check(
     member: discord.Member
 ):
-
     return (
         can_use_ai_dashboard(member)
         or has_broad_management(member)
@@ -976,22 +960,17 @@ def member_allowed(
     user_id: int,
     advanced: dict
 ):
-
     deny_members = set()
 
     for value in advanced.get(
         "deny_members",
         []
     ):
-
         try:
-
             deny_members.add(
                 int(value)
             )
-
         except Exception:
-
             pass
 
     if user_id in deny_members:
@@ -1005,14 +984,12 @@ def member_allowed(
     if allow_members:
 
         try:
-
             allow_ids = {
                 int(value)
                 for value in allow_members
             }
 
         except Exception:
-
             allow_ids = set()
 
         return user_id in allow_ids
@@ -1028,12 +1005,10 @@ def contains_sensitive_content(
     content: str,
     advanced: dict
 ):
-
     if not advanced.get(
         "security_enabled",
         True
     ):
-
         return False
 
     text = normalize_text(
@@ -1064,7 +1039,6 @@ def contains_sensitive_content(
 def get_request_key(
     message: discord.Message
 ):
-
     return (
         (
             message.guild.id
@@ -1083,9 +1057,7 @@ def get_request_key(
 def get_bot_lock(
     guild_id: int
 ):
-
     if guild_id not in BOT_CHAT_LOCKS:
-
         BOT_CHAT_LOCKS[guild_id] = (
             asyncio.Lock()
         )
@@ -1096,7 +1068,6 @@ def get_bot_lock(
 def get_bot_chain(
     guild_id: int
 ):
-
     return BOT_CHAT_CHAINS.get(
         guild_id,
         0
@@ -1106,14 +1077,12 @@ def get_bot_chain(
 def reset_bot_chain(
     guild_id: int
 ):
-
     BOT_CHAT_CHAINS[guild_id] = 0
 
 
 def increment_bot_chain(
     guild_id: int
 ):
-
     value = BOT_CHAT_CHAINS.get(
         guild_id,
         0
@@ -1130,7 +1099,6 @@ def bot_cooldown_active(
     guild_id: int,
     cooldown: float
 ):
-
     last_response = (
         BOT_CHAT_LAST_RESPONSE.get(
             guild_id
@@ -1151,12 +1119,10 @@ def should_process_bot_chat(
     config: dict,
     advanced: dict
 ):
-
     if not advanced.get(
         "bot_chat_enabled",
         True
     ):
-
         return False
 
     if not message.author.bot:
@@ -1167,7 +1133,6 @@ def should_process_bot_chat(
         and message.author.id
         == bot.user.id
     ):
-
         return False
 
     if not message.guild:
@@ -1197,7 +1162,6 @@ def should_process_bot_chat(
         guild_id,
         cooldown
     ):
-
         return False
 
     return True
@@ -1211,7 +1175,6 @@ def save_database_message(
     message: discord.Message,
     character_name: Optional[str] = None
 ):
-
     if not message.guild:
         return False
 
@@ -1228,7 +1191,6 @@ def save_database_message(
     content = message.content
 
     try:
-
         return db.add_message(
             guild_id,
             channel_id,
@@ -1241,7 +1203,6 @@ def save_database_message(
     except TypeError:
 
         try:
-
             return db.save_message(
                 guild_id=guild_id,
                 channel_id=channel_id,
@@ -1254,7 +1215,6 @@ def save_database_message(
         except Exception:
 
             try:
-
                 return db.save_message(
                     guild_id=guild_id,
                     channel_id=channel_id,
@@ -1264,7 +1224,6 @@ def save_database_message(
                 )
 
             except Exception:
-
                 return False
 
     except Exception:
@@ -1282,7 +1241,6 @@ async def generate_chat_reply(
     message: discord.Message,
     prompt: str
 ):
-
     guild = message.guild
 
     if guild is None:
@@ -1317,7 +1275,6 @@ async def generate_chat_reply(
     )
 
     if not prompt:
-
         prompt = (
             "رد على المستخدم بشكل طبيعي."
         )
@@ -1406,6 +1363,7 @@ async def generate_chat_reply(
                     ),
 
                     max_tokens_override=response_length,
+
                 ),
 
                 timeout=timeout
@@ -1475,7 +1433,6 @@ async def ai_group_generate(
         GOOGLE_MODEL
     )
 
-    # شخصية مؤقتة خاصة بالعضو الحالي في المجموعة.
     character = {
 
         "name": bot_name,
@@ -1511,16 +1468,13 @@ async def ai_group_generate(
     )
 
     history_limit = (
-
         int(
             advanced.get(
                 "history_limit",
                 20
             )
         )
-
         if memory_enabled
-
         else 0
     )
 
@@ -1561,15 +1515,14 @@ async def ai_group_generate(
 
                 mode=mode,
 
-                # مركزي:
                 provider=provider,
 
-                # مركزي:
                 model=model,
 
                 history_limit=history_limit,
 
                 max_tokens_override=response_length,
+
             ),
 
             timeout=timeout
@@ -1588,7 +1541,6 @@ async def generate_dm_reply(
     user_id: int,
     prompt: str
 ):
-
     try:
 
         async with AI_SEMAPHORE:
@@ -1616,6 +1568,7 @@ async def generate_dm_reply(
                     history_limit=20,
 
                     max_tokens_override=1200,
+
                 ),
 
                 timeout=DEFAULT_AI_TIMEOUT
@@ -1646,7 +1599,6 @@ def format_ai_response(
     message: discord.Message,
     response: str
 ):
-
     character = None
 
     if message.guild:
@@ -1688,7 +1640,6 @@ async def send_ai_response(
     message: discord.Message,
     response: str
 ):
-
     if not response:
         return
 
@@ -1733,7 +1684,6 @@ async def generate_with_typing_message(
     message: discord.Message,
     prompt: str
 ):
-
     character = (
         get_active_character_for_user(
             message.guild.id,
@@ -1787,7 +1737,6 @@ async def generate_with_typing_message(
         if not response:
 
             if placeholder:
-
                 await placeholder.delete()
 
             return
@@ -1805,7 +1754,6 @@ async def generate_with_typing_message(
         if not chunks:
 
             if placeholder:
-
                 await placeholder.delete()
 
             return
@@ -1835,7 +1783,6 @@ async def generate_with_typing_message(
 
             try:
                 await placeholder.delete()
-
             except Exception:
                 pass
 
@@ -1856,7 +1803,6 @@ async def generate_with_typing_message(
                 )
 
             except Exception:
-
                 pass
 
 
@@ -1867,7 +1813,6 @@ async def generate_with_typing_message(
 def make_character_options(
     characters
 ):
-
     options = []
 
     for character in characters[:25]:
@@ -1924,7 +1869,6 @@ class CharacterInfoSelect(
         guild_id,
         characters
     ):
-
         self.guild_id = guild_id
 
         super().__init__(
@@ -2054,7 +1998,6 @@ class CharacterInfoView(
         guild_id,
         characters
     ):
-
         super().__init__(
             timeout=120
         )
@@ -2082,7 +2025,6 @@ class CharacterUseSelect(
         guild_id,
         characters
     ):
-
         self.guild_id = guild_id
 
         super().__init__(
@@ -2186,7 +2128,6 @@ class CharacterUseView(
         guild_id,
         characters
     ):
-
         super().__init__(
             timeout=120
         )
@@ -2243,7 +2184,6 @@ class CharacterEditModal(
         guild_id,
         character
     ):
-
         super().__init__()
 
         self.guild_id = guild_id
@@ -2348,7 +2288,6 @@ class CharacterEditSelect(
         guild_id,
         characters
     ):
-
         self.guild_id = guild_id
 
         super().__init__(
@@ -2415,7 +2354,6 @@ class CharacterEditView(
         guild_id,
         characters
     ):
-
         super().__init__(
             timeout=120
         )
@@ -2444,7 +2382,6 @@ class CharacterDeleteConfirm(
         character_name,
         owner_id
     ):
-
         super().__init__(
             timeout=60
         )
@@ -2534,7 +2471,6 @@ class CharacterDeleteSelect(
         guild_id,
         characters
     ):
-
         self.guild_id = guild_id
 
         super().__init__(
@@ -2619,7 +2555,6 @@ class CharacterDeleteView(
         guild_id,
         characters
     ):
-
         super().__init__(
             timeout=120
         )
@@ -2641,7 +2576,6 @@ class CharacterDeleteView(
 def build_ai_dashboard(
     guild: discord.Guild
 ):
-
     config = get_config(
         guild.id
     )
@@ -2830,7 +2764,6 @@ class TextSettingsModal(
         max_length=4
     )
 
-    # لا نستخدم اسم timeout لأنه محجوز داخل Modal
     ai_timeout = discord.ui.TextInput(
         label="مهلة AI بالثواني",
         placeholder="10 - 180",
@@ -2856,7 +2789,6 @@ class TextSettingsModal(
         self,
         guild_id: int
     ):
-
         super().__init__()
 
         self.guild_id = guild_id
@@ -3013,7 +2945,6 @@ class AllowDenyModal(
         self,
         guild_id: int
     ):
-
         super().__init__()
 
         self.guild_id = guild_id
@@ -3106,7 +3037,6 @@ class AISettingsView(
         self,
         guild_id: int
     ):
-
         super().__init__(
             timeout=300
         )
@@ -3127,7 +3057,6 @@ class AISettingsView(
             member,
             discord.Member
         ):
-
             return False
 
         if not can_use_ai_dashboard(
@@ -3147,7 +3076,6 @@ class AISettingsView(
         self,
         interaction: discord.Interaction
     ):
-
         await interaction.response.edit_message(
             embed=build_ai_dashboard(
                 interaction.guild
@@ -3166,7 +3094,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         config = get_config(
             self.guild_id
         )
@@ -3195,7 +3122,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         await interaction.response.edit_message(
             content="💬 اختر طريقة الرد:",
             embed=None,
@@ -3215,7 +3141,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         characters = get_all_characters(
             self.guild_id
         )
@@ -3249,7 +3174,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         await interaction.response.edit_message(
             content="🧠 اختر وضع AI:",
             embed=None,
@@ -3269,7 +3193,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         settings = get_advanced(
             self.guild_id
         )
@@ -3298,7 +3221,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         await interaction.response.send_modal(
             TextSettingsModal(
                 self.guild_id
@@ -3316,7 +3238,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         settings = get_advanced(
             self.guild_id
         )
@@ -3345,7 +3266,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         settings = get_advanced(
             self.guild_id
         )
@@ -3374,7 +3294,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         await interaction.response.send_modal(
             AllowDenyModal(
                 self.guild_id
@@ -3392,7 +3311,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         await interaction.response.edit_message(
             content="📢 اختر الروم:",
             embed=None,
@@ -3412,7 +3330,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         try:
 
             db.clear_memory(
@@ -3444,7 +3361,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         reset_advanced(
             self.guild_id
         )
@@ -3464,7 +3380,6 @@ class AISettingsView(
         interaction,
         button
     ):
-
         await self.refresh(
             interaction
         )
@@ -3482,7 +3397,6 @@ class ReplyTypeSelect(
         self,
         guild_id: int
     ):
-
         self.guild_id = guild_id
 
         options = []
@@ -3506,7 +3420,6 @@ class ReplyTypeSelect(
         self,
         interaction: discord.Interaction
     ):
-
         value = self.values[0]
 
         try:
@@ -3517,7 +3430,6 @@ class ReplyTypeSelect(
             )
 
             if not success:
-
                 raise RuntimeError(
                     "Failed to save reply type."
                 )
@@ -3550,7 +3462,6 @@ class ReplyTypeView(
         self,
         guild_id: int
     ):
-
         super().__init__(
             timeout=120
         )
@@ -3570,10 +3481,9 @@ class ReplyTypeView(
     )
     async def back(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
-
         await interaction.response.edit_message(
             content=None,
             embed=build_ai_dashboard(
@@ -3597,7 +3507,6 @@ class ModeSelect(
         self,
         guild_id: int
     ):
-
         self.guild_id = guild_id
 
         options = []
@@ -3619,9 +3528,8 @@ class ModeSelect(
 
     async def callback(
         self,
-        interaction: discord.Interaction
+        interaction
     ):
-
         value = self.values[0]
 
         try:
@@ -3632,7 +3540,6 @@ class ModeSelect(
             )
 
             if not success:
-
                 raise RuntimeError(
                     "Failed to save mode."
                 )
@@ -3665,7 +3572,6 @@ class ModeView(
         self,
         guild_id: int
     ):
-
         super().__init__(
             timeout=120
         )
@@ -3685,10 +3591,9 @@ class ModeView(
     )
     async def back(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
-
         await interaction.response.edit_message(
             content=None,
             embed=build_ai_dashboard(
@@ -3713,7 +3618,6 @@ class CharacterDashboardSelect(
         guild_id: int,
         characters
     ):
-
         self.guild_id = guild_id
 
         super().__init__(
@@ -3727,7 +3631,6 @@ class CharacterDashboardSelect(
         self,
         interaction: discord.Interaction
     ):
-
         name = self.values[0]
 
         character = get_character(
@@ -3752,7 +3655,6 @@ class CharacterDashboardSelect(
             )
 
             if not success:
-
                 raise RuntimeError(
                     "Failed to activate server character."
                 )
@@ -3786,7 +3688,6 @@ class CharacterDashboardView(
         guild_id: int,
         characters
     ):
-
         super().__init__(
             timeout=120
         )
@@ -3807,10 +3708,9 @@ class CharacterDashboardView(
     )
     async def back(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
-
         await interaction.response.edit_message(
             content=None,
             embed=build_ai_dashboard(
@@ -3834,7 +3734,6 @@ class ChannelSelect(
         self,
         guild_id: int
     ):
-
         self.guild_id = guild_id
 
         super().__init__(
@@ -3850,7 +3749,6 @@ class ChannelSelect(
         self,
         interaction: discord.Interaction
     ):
-
         channel = self.values[0]
 
         try:
@@ -3861,7 +3759,6 @@ class ChannelSelect(
             )
 
             if not success:
-
                 raise RuntimeError(
                     "Failed to save channel."
                 )
@@ -3894,7 +3791,6 @@ class ChannelView(
         self,
         guild_id: int
     ):
-
         super().__init__(
             timeout=120
         )
@@ -3914,10 +3810,9 @@ class ChannelView(
     )
     async def back(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
-
         await interaction.response.edit_message(
             content=None,
             embed=build_ai_dashboard(
@@ -3940,7 +3835,6 @@ class ChannelView(
 async def ai_command(
     interaction: discord.Interaction
 ):
-
     if not interaction.guild:
         return
 
@@ -3990,7 +3884,6 @@ async def ai_command(
 async def ai_setup(
     interaction: discord.Interaction
 ):
-
     if not interaction.guild:
         return
 
@@ -4027,7 +3920,6 @@ async def ai_setup(
 async def ai_settings(
     interaction: discord.Interaction
 ):
-
     if not interaction.guild:
         return
 
@@ -4066,7 +3958,6 @@ async def ai_settings(
 async def ai_config(
     interaction: discord.Interaction
 ):
-
     if not interaction.guild:
         return
 
@@ -4110,7 +4001,6 @@ async def character_create(
     interaction: discord.Interaction,
     name: str
 ):
-
     if not interaction.guild:
         return
 
@@ -4195,7 +4085,6 @@ async def character_create(
 async def character_info(
     interaction: discord.Interaction
 ):
-
     if not interaction.guild:
         return
 
@@ -4229,7 +4118,6 @@ async def character_info(
 async def character_use(
     interaction: discord.Interaction
 ):
-
     if not interaction.guild:
         return
 
@@ -4315,7 +4203,6 @@ async def character_use(
 async def character_edit(
     interaction: discord.Interaction
 ):
-
     if not interaction.guild:
         return
 
@@ -4350,7 +4237,6 @@ async def character_edit(
 async def character_delete(
     interaction: discord.Interaction
 ):
-
     if not interaction.guild:
         return
 
@@ -4385,7 +4271,6 @@ async def character_delete(
 async def character_list(
     interaction: discord.Interaction
 ):
-
     if not interaction.guild:
         return
 
@@ -4469,7 +4354,6 @@ async def character_list(
 async def ai_status(
     interaction: discord.Interaction
 ):
-
     if not interaction.guild:
         return
 
@@ -4545,7 +4429,6 @@ async def ai_status(
 async def ai_memory_clear(
     interaction: discord.Interaction
 ):
-
     if not interaction.guild:
         return
 
@@ -4594,7 +4477,6 @@ async def ai_memory_clear(
 async def ai_dm(
     interaction: discord.Interaction
 ):
-
     try:
 
         current = db.get_dm_enabled(
@@ -4647,15 +4529,10 @@ async def on_message(
         and message.author.id
         == bot.user.id
     ):
-
         return
 
     # --------------------------------------------------------
     # AI GROUP
-    # --------------------------------------------------------
-    #
-    # المجموعة تبدأ فقط من رسائل البشر.
-    # رسائل البوتات الثانوية لا تعيد تشغيل المجموعة.
     # --------------------------------------------------------
 
     if (
@@ -4938,7 +4815,6 @@ async def on_message(
             "channel",
             "auto"
         ):
-
             pass
 
         elif reply_type == "bot_chat":
@@ -5123,6 +4999,59 @@ async def on_app_command_error(
 
 
 # ============================================================
+# SECONDARY BOT STARTUP
+# ============================================================
+
+async def start_secondary_bots_safe():
+
+    global ai_group
+
+    if ai_group is None:
+
+        print(
+            "[AI_GROUP] Manager is not initialized."
+        )
+
+        return
+
+    try:
+
+        print(
+            "[AI_GROUP] Starting secondary bots..."
+        )
+
+        await ai_group.start_clients()
+
+        await asyncio.sleep(
+            0.5
+        )
+
+        print(
+            (
+                "[AI_GROUP] Secondary startup "
+                "requested successfully: "
+                f"{ai_group.configured_count()}/5"
+            )
+        )
+
+    except asyncio.CancelledError:
+
+        print(
+            "[AI_GROUP] Secondary startup task cancelled."
+        )
+
+        raise
+
+    except Exception:
+
+        print(
+            "[FATAL] Secondary bot startup failed:"
+        )
+
+        traceback.print_exc()
+
+
+# ============================================================
 # SETUP HOOK
 # ============================================================
 
@@ -5130,6 +5059,7 @@ async def on_app_command_error(
 async def setup_hook():
 
     global ai_group
+    global SECONDARY_STARTUP_TASK
 
     try:
 
@@ -5144,13 +5074,7 @@ async def setup_hook():
         )
 
         # ----------------------------------------------------
-        # تشغيل البوتات الثانوية الموجودة في Secrets
-        # ----------------------------------------------------
-
-        await ai_group.start_clients()
-
-        # ----------------------------------------------------
-        # تسجيل /ai_group
+        # تسجيل أمر /ai_group أولًا
         # ----------------------------------------------------
 
         await ai_group.register_command(
@@ -5170,13 +5094,39 @@ async def setup_hook():
         print(
             (
                 "[AI_GROUP] "
-                f"configured={ai_group.configured_count()}/5"
+                f"configured="
+                f"{ai_group.configured_count()}/5"
             )
         )
 
+        # ----------------------------------------------------
+        # تشغيل البوتات الثانوية في الخلفية
+        # ----------------------------------------------------
+
+        SECONDARY_STARTUP_TASK = asyncio.create_task(
+            start_secondary_bots_safe()
+        )
+
+        print(
+            "[AI_GROUP] Secondary bots are starting "
+            "in the background..."
+        )
+
+    except asyncio.CancelledError:
+
+        raise
+
     except Exception:
 
+        print(
+            "[FATAL] setup_hook failed:"
+        )
+
         traceback.print_exc()
+
+        # مهم جدًا:
+        # لا نخفي خطأ الإقلاع
+        raise
 
 
 # ============================================================
