@@ -1410,9 +1410,13 @@ async def ai_group_generate(
     """
     AI Group uses the SAME Provider + Model as MyAI.
 
-    The five Discord bot accounts are only different
-    Discord identities. The AI configuration remains
-    centralized in MyAI.
+    AI Group already builds its own:
+        - conversation context
+        - per-bot memory
+        - character/personality context
+
+    Therefore the normal MyAI SQLite history is disabled
+    here to avoid duplicating context and wasting input tokens.
     """
 
     config = get_config(
@@ -1434,16 +1438,21 @@ async def ai_group_generate(
     )
 
     character = {
-
         "name": bot_name,
 
         "description": (
             f"عضو رقم {slot} في مجموعة MyAI."
         ),
 
-        "personality": personality,
+        "personality": (
+            personality
+            or "ودود، ذكي، طبيعي."
+        ),
 
-        "speaking_style": speaking_style,
+        "speaking_style": (
+            speaking_style
+            or "تكلم بشكل طبيعي ومختصر."
+        ),
 
         "custom_instructions": (
             f"أنت العضو رقم {slot} في مجموعة AI. "
@@ -1459,24 +1468,6 @@ async def ai_group_generate(
 
         "model": model,
     }
-
-    memory_enabled = bool(
-        advanced.get(
-            "memory_enabled",
-            True
-        )
-    )
-
-    history_limit = (
-        int(
-            advanced.get(
-                "history_limit",
-                20
-            )
-        )
-        if memory_enabled
-        else 0
-    )
 
     response_length = int(
         advanced.get(
@@ -1519,7 +1510,12 @@ async def ai_group_generate(
 
                 model=model,
 
-                history_limit=history_limit,
+                # ====================================================
+                # IMPORTANT:
+                # AI Group already has its own conversation + memory.
+                # Do NOT add the normal SQLite history again.
+                # ====================================================
+                history_limit=0,
 
                 max_tokens_override=response_length,
 
@@ -5016,23 +5012,9 @@ async def start_secondary_bots_safe():
 
     try:
 
-        print(
-            "[AI_GROUP] Starting secondary bots..."
-        )
-
+        # ai_group.start_clients() مسؤول عن
+        # رسائل تشغيل البوتات الثانوية.
         await ai_group.start_clients()
-
-        await asyncio.sleep(
-            0.5
-        )
-
-        print(
-            (
-                "[AI_GROUP] Secondary startup "
-                "requested successfully: "
-                f"{ai_group.configured_count()}/5"
-            )
-        )
 
     except asyncio.CancelledError:
 
@@ -5074,7 +5056,7 @@ async def setup_hook():
         )
 
         # ----------------------------------------------------
-        # تسجيل أمر /ai_group أولًا
+        # تسجيل أمر /ai_group
         # ----------------------------------------------------
 
         await ai_group.register_command(
@@ -5103,14 +5085,29 @@ async def setup_hook():
         # تشغيل البوتات الثانوية في الخلفية
         # ----------------------------------------------------
 
-        SECONDARY_STARTUP_TASK = asyncio.create_task(
-            start_secondary_bots_safe()
-        )
+        if (
+            SECONDARY_STARTUP_TASK is None
+            or SECONDARY_STARTUP_TASK.done()
+        ):
 
-        print(
-            "[AI_GROUP] Secondary bots are starting "
-            "in the background..."
-        )
+            SECONDARY_STARTUP_TASK = (
+                asyncio.create_task(
+                    start_secondary_bots_safe(),
+                    name="secondary_bot_startup",
+                )
+            )
+
+            print(
+                "[AI_GROUP] Secondary bots are "
+                "starting in the background..."
+            )
+
+        else:
+
+            print(
+                "[AI_GROUP] Secondary startup task "
+                "already exists."
+            )
 
     except asyncio.CancelledError:
 
@@ -5124,8 +5121,6 @@ async def setup_hook():
 
         traceback.print_exc()
 
-        # مهم جدًا:
-        # لا نخفي خطأ الإقلاع
         raise
 
 
