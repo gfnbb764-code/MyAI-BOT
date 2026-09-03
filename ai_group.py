@@ -29,6 +29,8 @@
 # - Automatic DB migrations
 # - Safe background tasks
 # - Error recovery
+# - Sequential AI replies
+# - Bot-to-bot Discord replies
 # - No token logging
 #
 # ============================================================
@@ -154,7 +156,6 @@ class AIGroupDB:
     """
     Database layer dedicated to AI Group.
 
-    Important:
     This class NEVER deletes the existing database.
 
     Old installations are automatically migrated.
@@ -180,6 +181,7 @@ class AIGroupDB:
         conn.row_factory = sqlite3.Row
 
         try:
+
             conn.execute(
                 "PRAGMA journal_mode=WAL"
             )
@@ -379,14 +381,6 @@ class AIGroupDB:
             # MIGRATION
             # =================================================
 
-            # Older versions may have created ai_group_stats
-            # without "slot" or "errors".
-            #
-            # We cannot safely ALTER a primary key structure
-            # in every SQLite version, so we detect old layouts
-            # and migrate them carefully.
-            # =================================================
-
             stats_columns = self._get_columns(
                 conn,
                 "ai_group_stats",
@@ -440,8 +434,6 @@ class AIGroupDB:
                         """
                     )
 
-                    # Legacy data may have been guild-level only.
-                    # Preserve it by assigning it to slot 1.
                     for row in old_rows:
 
                         keys = row.keys()
@@ -496,10 +488,6 @@ class AIGroupDB:
                     )
 
                 else:
-
-                    # ------------------------------------------------
-                    # New structure exists but errors may be missing.
-                    # ------------------------------------------------
 
                     self._add_column_if_missing(
                         conn,
@@ -700,6 +688,7 @@ class AIGroupDB:
         )
 
         return GroupSettings(
+
             guild_id=guild_id,
 
             enabled=bool(
@@ -725,7 +714,8 @@ class AIGroupDB:
                 0,
                 float(
                     row["cooldown"]
-                    or DEFAULT_COOLDOWN
+                    if row["cooldown"] is not None
+                    else DEFAULT_COOLDOWN
                 ),
             ),
 
@@ -733,7 +723,8 @@ class AIGroupDB:
                 0,
                 float(
                     row["round_delay"]
-                    or DEFAULT_ROUND_DELAY
+                    if row["round_delay"] is not None
+                    else DEFAULT_ROUND_DELAY
                 ),
             ),
 
@@ -867,7 +858,6 @@ class AIGroupDB:
                 """
                 SELECT *
                 FROM ai_group_bots
-
                 WHERE guild_id = ?
                 AND slot = ?
                 """,
@@ -947,7 +937,8 @@ class AIGroupDB:
                     100,
                     int(
                         row["power"]
-                        or DEFAULT_POWER
+                        if row["power"] is not None
+                        else DEFAULT_POWER
                     ),
                 ),
             ),
@@ -968,7 +959,8 @@ class AIGroupDB:
                     100,
                     int(
                         row["participation"]
-                        or DEFAULT_PARTICIPATION
+                        if row["participation"] is not None
+                        else DEFAULT_PARTICIPATION
                     ),
                 ),
             ),
@@ -1181,9 +1173,7 @@ class AIGroupDB:
                 SELECT
                     messages,
                     errors
-
                 FROM ai_group_stats
-
                 WHERE guild_id = ?
                 AND slot = ?
                 """,
@@ -1218,11 +1208,11 @@ class SecondaryBotClient(
 
         intents = discord.Intents.default()
 
-        # Secondary bots only send messages.
-        #
-        # They do NOT need message_content for the current
-        # architecture because the MAIN bot receives the
-        # user's message and generates the AI response.
+        # ----------------------------------------------------
+        # Secondary bots do not process messages themselves.
+        # Main bot controls the AI Group sequence.
+        # ----------------------------------------------------
+
         intents.message_content = False
 
         super().__init__(
@@ -1619,21 +1609,15 @@ class AIGroupManager:
         )
 
         if settings.enabled:
-
             status = "🟢 مفعلة"
-
         else:
-
             status = "🔴 متوقفة"
 
         if settings.channel_id:
-
             channel_text = (
                 f"<#{settings.channel_id}>"
             )
-
         else:
-
             channel_text = "غير محدد"
 
         mode_names = {
@@ -1776,10 +1760,6 @@ class AIGroupManager:
             )
 
         try:
-
-            # =================================================
-            # REAL DISCORD ACCOUNT USERNAME CHANGE
-            # =================================================
 
             await client.user.edit(
                 username=new_name
@@ -1993,6 +1973,12 @@ class AIGroupManager:
         if message.guild is None:
             return False
 
+        # ----------------------------------------------------
+        # Only HUMAN messages start an AI Group round.
+        # Secondary bot messages are never used to trigger
+        # another group round.
+        # ----------------------------------------------------
+
         if message.author.bot:
             return False
 
@@ -2035,7 +2021,6 @@ class AIGroupManager:
         )
 
         if lock.locked():
-
             return True
 
         task = asyncio.create_task(
@@ -2139,7 +2124,10 @@ class AIGroupManager:
                 ):
                     continue
 
-                # Participation probability.
+                # ------------------------------------------------
+                # Participation probability
+                # ------------------------------------------------
+
                 if (
                     cfg.participation < 100
                 ):
@@ -2194,7 +2182,6 @@ class AIGroupManager:
 
             elif settings.mode == "round_robin":
 
-                # Keep slots in a predictable order.
                 candidates.sort(
                     key=lambda x: x.slot
                 )
@@ -2229,6 +2216,9 @@ class AIGroupManager:
                 :settings.max_turns
             ]
 
+            if not candidates:
+                return
+
             # =================================================
             # CONVERSATION CONTEXT
             # =================================================
@@ -2237,6 +2227,20 @@ class AIGroupManager:
                 message.content
                 or "(رسالة فارغة)"
             )
+
+            # -------------------------------------------------
+            # This is the Discord message that the NEXT bot
+            # will reply to.
+            #
+            # First bot -> user message
+            # Second bot -> first bot message
+            # Third bot -> second bot message
+            # etc.
+            # -------------------------------------------------
+
+            previous_message: Optional[
+                discord.Message
+            ] = None
 
             # =================================================
             # BOT TURNS
@@ -2261,6 +2265,10 @@ class AIGroupManager:
 
                 try:
 
+                    # ------------------------------------------------
+                    # Generate AI response
+                    # ------------------------------------------------
+
                     result = (
                         await self.generate_for_bot(
                             message=message,
@@ -2272,9 +2280,14 @@ class AIGroupManager:
                     if not result:
                         continue
 
+                    # ------------------------------------------------
+                    # Send from the SECONDARY BOT account.
+                    # ------------------------------------------------
+
                     sent = (
                         await self.send_bot_message(
                             message=message,
+                            previous_message=previous_message,
                             client=client,
                             cfg=cfg,
                             text=result,
@@ -2288,11 +2301,22 @@ class AIGroupManager:
                             cfg.slot,
                         )
 
+                        # ------------------------------------------------
+                        # Add this bot's response to the AI context.
+                        # ------------------------------------------------
+
                         conversation += (
                             f"\n\n"
                             f"{cfg.name}: "
                             f"{result}"
                         )
+
+                        # ------------------------------------------------
+                        # IMPORTANT:
+                        # The next bot replies to THIS message.
+                        # ------------------------------------------------
+
+                        previous_message = sent
 
                 except asyncio.CancelledError:
 
@@ -2312,6 +2336,10 @@ class AIGroupManager:
                         f"{type(exc).__name__}: "
                         f"{exc}"
                     )
+
+                # ------------------------------------------------
+                # Delay between bots
+                # ------------------------------------------------
 
                 if (
                     index
@@ -2372,8 +2400,12 @@ class AIGroupManager:
 8. اجعل الرد مناسبًا للمحادثة.
 9. لا تكرر الرسالة الأصلية بلا فائدة.
 10. لا تبدأ الرد باسمك إلا إذا كان ذلك طبيعيًا.
-11. لا تحاول إنشاء Loop مع بقية البوتات.
-12. لا تستخدم ردودًا طويلة بلا داعٍ.
+11. تفاعل مع ردود البوتات السابقة.
+12. اعتبر آخر بوت متحدثًا كأنه شخص يحاورك.
+13. لا تخرج عن موضوع المحادثة.
+14. لا تستخدم ردودًا طويلة بلا داعٍ.
+15. لا تحاول إنشاء Loop بنفسك.
+16. إذا كنت ترد على بوت آخر، اجعل ردك مرتبطًا مباشرة بكلامه.
 """
 
         prompt = f"""
@@ -2381,82 +2413,73 @@ class AIGroupManager:
 
 {message.content}
 
-سياق المحادثة الحالي:
+سياق محادثة AI Group:
 
 {conversation}
 
-اكتب رد Bot {cfg.slot} الآن.
+أنت الآن Bot {cfg.slot}.
 
-اسمك داخل المجموعة:
+اكتب ردك على آخر رسالة في المحادثة.
+
+اسمك:
 {cfg.name}
 
-الشخصية:
+شخصيتك:
 {personality}
 
-أسلوب الكلام:
+أسلوبك:
 {speaking_style}
 
-قوة الشخصية:
+قوتك:
 {cfg.power}/100
+
+إذا كان هناك بوت آخر تحدث قبلك،
+تفاعل مع كلامه مباشرة وكأنك ترد عليه.
+
+لا تشرح أنك تستخدم API.
+لا تقل إنك البوت الرئيسي.
+لا تبدأ محادثة جديدة منفصلة عن السياق.
 """
 
         # =====================================================
-        # IMPORTANT COMPATIBILITY LAYER
+        # MAIN.PY COMPATIBILITY
         # =====================================================
         #
-        # Older main.py versions don't accept system_prompt.
+        # Current main.py signature:
         #
-        # Instead of crashing with:
+        # ai_group_generate(
+        #     guild_id,
+        #     slot,
+        #     user_id,
+        #     channel_id,
+        #     prompt,
+        #     bot_name,
+        #     personality,
+        #     speaking_style,
+        #     power,
+        # )
         #
-        # TypeError:
-        # ai_group_generate()
-        # got an unexpected keyword argument 'system_prompt'
+        # There is NO system_prompt parameter.
         #
-        # we try the rich call first and automatically retry
-        # using the compatible argument set.
+        # Provider/model are taken by main.py from the
+        # main MyAI configuration.
         # =====================================================
 
-        try:
-
-            result = await self.ai_generate(
-                guild_id=message.guild.id,
-                user_id=message.author.id,
-                bot_name=cfg.name,
-                personality=personality,
-                speaking_style=speaking_style,
-                power=cfg.power,
-                prompt=prompt,
-                system_prompt=system_context,
-            )
-
-        except TypeError as exc:
-
-            error_text = str(exc)
-
-            if (
-                "system_prompt"
-                not in error_text
-            ):
-
-                raise
-
-            # -------------------------------------------------
-            # Compatibility retry.
-            # -------------------------------------------------
-
-            result = await self.ai_generate(
-                guild_id=message.guild.id,
-                user_id=message.author.id,
-                bot_name=cfg.name,
-                personality=personality,
-                speaking_style=speaking_style,
-                power=cfg.power,
-                prompt=(
-                    system_context
-                    + "\n\n"
-                    + prompt
-                ),
-            )
+        result = await self.ai_generate(
+            guild_id=message.guild.id,
+            slot=cfg.slot,
+            user_id=message.author.id,
+            channel_id=message.channel.id,
+            prompt=(
+                system_context
+                + "\n\n"
+                + prompt
+            ),
+            bot_name=cfg.name,
+            personality=personality,
+            speaking_style=speaking_style,
+            power=cfg.power,
+        )
 
         if result is None:
             return ""
@@ -2487,6 +2510,7 @@ class AIGroupManager:
     async def send_bot_message(
         self,
         message: discord.Message,
+        previous_message: Optional[discord.Message],
         client: SecondaryBotClient,
         cfg: GroupBotConfig,
         text: str,
@@ -2504,38 +2528,139 @@ class AIGroupManager:
                 + "..."
             )
 
-        allowed_mentions = (
-            discord.AllowedMentions(
-                users=False,
-                roles=False,
-                everyone=False,
-                replied_user=False,
-            )
+        allowed_mentions = discord.AllowedMentions(
+            users=False,
+            roles=False,
+            everyone=False,
+            replied_user=False,
         )
 
         try:
 
-            if cfg.reply_mode == "channel":
+            # =================================================
+            # IMPORTANT:
+            # Get the channel USING THE SECONDARY BOT CLIENT.
+            #
+            # This guarantees that Bot 1/2/3/4/5 actually
+            # sends as its own Discord account.
+            # =================================================
 
-                return await message.channel.send(
+            channel = client.get_channel(
+                message.channel.id
+            )
+
+            if channel is None:
+
+                channel = await client.fetch_channel(
+                    message.channel.id
+                )
+
+            if channel is None:
+
+                print(
+                    "[AI_GROUP] "
+                    f"Bot {cfg.slot}: "
+                    "channel not found."
+                )
+
+                return None
+
+            # =================================================
+            # FIRST BOT
+            #
+            # Reply to the user's original message.
+            # =================================================
+
+            if previous_message is None:
+
+                try:
+
+                    return await channel.send(
+                        text,
+                        reference=message,
+                        mention_author=False,
+                        allowed_mentions=allowed_mentions,
+                    )
+
+                except discord.HTTPException:
+
+                    # ------------------------------------------------
+                    # Fallback:
+                    # If Discord refuses the message reference,
+                    # send a normal message.
+                    # ------------------------------------------------
+
+                    return await channel.send(
+                        text,
+                        allowed_mentions=allowed_mentions,
+                    )
+
+            # =================================================
+            # NEXT BOT
+            #
+            # Reply to the previous AI bot.
+            # =================================================
+
+            try:
+
+                return await channel.send(
+                    text,
+                    reference=previous_message,
+                    mention_author=False,
+                    allowed_mentions=allowed_mentions,
+                )
+
+            except discord.HTTPException:
+
+                # ------------------------------------------------
+                # Fallback if Discord refuses the reference.
+                # ------------------------------------------------
+
+                return await channel.send(
                     text,
                     allowed_mentions=allowed_mentions,
                 )
 
-            return await message.reply(
-                text,
-                mention_author=False,
-                allowed_mentions=allowed_mentions,
+        except discord.Forbidden as exc:
+
+            print(
+                "[AI_GROUP] "
+                f"Bot {cfg.slot} "
+                f"permission error: {exc}"
             )
+
+            return None
+
+        except discord.NotFound as exc:
+
+            print(
+                "[AI_GROUP] "
+                f"Bot {cfg.slot} "
+                f"channel/message not found: {exc}"
+            )
+
+            return None
 
         except discord.HTTPException as exc:
 
             print(
                 "[AI_GROUP] "
                 f"Bot {cfg.slot} "
-                f"failed to send message: "
-                f"{exc}"
+                f"failed to send message: {exc}"
             )
+
+            return None
+
+        except Exception as exc:
+
+            print(
+                "[AI_GROUP] "
+                f"Bot {cfg.slot} "
+                f"unexpected send error: "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+            traceback.print_exc()
 
             return None
 
@@ -2602,7 +2727,6 @@ class AIGroupManager:
         for task in tasks:
 
             if not task.done():
-
                 task.cancel()
 
         if tasks:
@@ -2643,9 +2767,7 @@ class AIGroupManager:
             self.client_tasks.items()
         ):
 
-            if (
-                not task.done()
-            ):
+            if not task.done():
 
                 task.cancel()
 
