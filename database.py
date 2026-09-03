@@ -2,7 +2,7 @@ import os
 import json
 import sqlite3
 from datetime import datetime, timezone
-from typing import Optional, Any
+from typing import Optional
 
 
 # ============================================================
@@ -64,7 +64,10 @@ def utc_now():
     ).isoformat()
 
 
-def normalize_bool(value, default=False):
+def normalize_bool(
+    value,
+    default=False,
+):
     if value is None:
         return int(default)
 
@@ -105,7 +108,10 @@ def safe_json_loads(
     if value is None:
         return default
 
-    if isinstance(value, (list, dict)):
+    if isinstance(
+        value,
+        (list, dict),
+    ):
         return value
 
     try:
@@ -124,7 +130,10 @@ def normalize_list(value):
     if value is None:
         return []
 
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(
+        value,
+        (list, tuple, set),
+    ):
         return list(value)
 
     if isinstance(value, str):
@@ -138,7 +147,10 @@ def normalize_list(value):
             None,
         )
 
-        if isinstance(parsed, list):
+        if isinstance(
+            parsed,
+            list,
+        ):
             return parsed
 
         return [
@@ -433,65 +445,25 @@ class Database:
         # CHARACTERS
         # ----------------------------------------------------
 
-        self._add_column_if_missing(
-            "characters",
-            "description",
-            "TEXT DEFAULT ''",
-        )
+        character_columns = {
+            "description": "TEXT DEFAULT ''",
+            "personality": "TEXT DEFAULT ''",
+            "system_prompt": "TEXT DEFAULT ''",
+            "character_type": "TEXT DEFAULT 'normal'",
+            "custom_instructions": "TEXT DEFAULT ''",
+            "speaking_style": "TEXT DEFAULT ''",
+            "provider": "TEXT DEFAULT 'google'",
+            "model": "TEXT DEFAULT 'gemini-3.5-flash-lite'",
+            "created_by": "INTEGER DEFAULT 0",
+            "created_at": "TEXT",
+        }
 
-        self._add_column_if_missing(
-            "characters",
-            "personality",
-            "TEXT DEFAULT ''",
-        )
-
-        self._add_column_if_missing(
-            "characters",
-            "system_prompt",
-            "TEXT DEFAULT ''",
-        )
-
-        self._add_column_if_missing(
-            "characters",
-            "character_type",
-            "TEXT DEFAULT 'normal'",
-        )
-
-        self._add_column_if_missing(
-            "characters",
-            "custom_instructions",
-            "TEXT DEFAULT ''",
-        )
-
-        self._add_column_if_missing(
-            "characters",
-            "speaking_style",
-            "TEXT DEFAULT ''",
-        )
-
-        self._add_column_if_missing(
-            "characters",
-            "provider",
-            "TEXT DEFAULT 'google'",
-        )
-
-        self._add_column_if_missing(
-            "characters",
-            "model",
-            "TEXT DEFAULT 'gemini-3.5-flash-lite'",
-        )
-
-        self._add_column_if_missing(
-            "characters",
-            "created_by",
-            "INTEGER DEFAULT 0",
-        )
-
-        self._add_column_if_missing(
-            "characters",
-            "created_at",
-            "TEXT",
-        )
+        for column, definition in character_columns.items():
+            self._add_column_if_missing(
+                "characters",
+                column,
+                definition,
+            )
 
         # ----------------------------------------------------
         # MESSAGES
@@ -513,211 +485,76 @@ class Database:
         # GUILD SETTINGS
         # ----------------------------------------------------
 
-        self._add_column_if_missing(
-            "guild_settings",
-            "active_character",
-            "TEXT",
-        )
+        guild_columns = {
+            "active_character": "TEXT",
+            "active_provider": "TEXT DEFAULT 'google'",
+            "active_model": "TEXT DEFAULT 'gemini-3.5-flash-lite'",
+            "ai_enabled": "INTEGER DEFAULT 1",
+            "ai_channel_id": "INTEGER",
+            "ai_mode": "TEXT DEFAULT 'normal'",
+            "reply_type": "TEXT DEFAULT 'mention'",
+            "permission_preset": "TEXT DEFAULT 'default'",
+            "updated_at": "TEXT",
+        }
 
-        self._add_column_if_missing(
-            "guild_settings",
-            "active_provider",
-            "TEXT DEFAULT 'google'",
-        )
-
-        self._add_column_if_missing(
-            "guild_settings",
-            "active_model",
-            "TEXT DEFAULT 'gemini-3.5-flash-lite'",
-        )
-
-        self._add_column_if_missing(
-            "guild_settings",
-            "ai_enabled",
-            "INTEGER DEFAULT 1",
-        )
-
-        self._add_column_if_missing(
-            "guild_settings",
-            "ai_channel_id",
-            "INTEGER",
-        )
-
-        self._add_column_if_missing(
-            "guild_settings",
-            "ai_mode",
-            "TEXT DEFAULT 'normal'",
-        )
-
-        self._add_column_if_missing(
-            "guild_settings",
-            "reply_type",
-            "TEXT DEFAULT 'mention'",
-        )
-
-        self._add_column_if_missing(
-            "guild_settings",
-            "permission_preset",
-            "TEXT DEFAULT 'default'",
-        )
-
-        self._add_column_if_missing(
-            "guild_settings",
-            "updated_at",
-            "TEXT",
-        )
+        for column, definition in guild_columns.items():
+            self._add_column_if_missing(
+                "guild_settings",
+                column,
+                definition,
+            )
 
         # ----------------------------------------------------
         # AI CONFIG
         # ----------------------------------------------------
 
-        self._add_column_if_missing(
-            "ai_config",
-            "enabled",
-            "INTEGER DEFAULT 1",
-        )
+        ai_config_columns = {
+            "enabled": "INTEGER DEFAULT 1",
+            "channel_id": "INTEGER",
+            "mode": "TEXT DEFAULT 'normal'",
+            "reply_type": "TEXT DEFAULT 'mention'",
+            "character_name": "TEXT",
+            "permission_preset": "TEXT DEFAULT 'default'",
+            "provider": "TEXT DEFAULT 'google'",
+            "model": "TEXT DEFAULT 'gemini-3.5-flash-lite'",
+            "allow_management": "INTEGER DEFAULT 1",
+            "allow_channel_management": "INTEGER DEFAULT 1",
+            "allow_role_management": "INTEGER DEFAULT 1",
+            "updated_at": "TEXT",
+        }
 
-        self._add_column_if_missing(
-            "ai_config",
-            "channel_id",
-            "INTEGER",
-        )
-
-        self._add_column_if_missing(
-            "ai_config",
-            "mode",
-            "TEXT DEFAULT 'normal'",
-        )
-
-        self._add_column_if_missing(
-            "ai_config",
-            "reply_type",
-            "TEXT DEFAULT 'mention'",
-        )
-
-        self._add_column_if_missing(
-            "ai_config",
-            "character_name",
-            "TEXT",
-        )
-
-        self._add_column_if_missing(
-            "ai_config",
-            "permission_preset",
-            "TEXT DEFAULT 'default'",
-        )
-
-        self._add_column_if_missing(
-            "ai_config",
-            "provider",
-            "TEXT DEFAULT 'google'",
-        )
-
-        self._add_column_if_missing(
-            "ai_config",
-            "model",
-            "TEXT DEFAULT 'gemini-3.5-flash-lite'",
-        )
-
-        self._add_column_if_missing(
-            "ai_config",
-            "allow_management",
-            "INTEGER DEFAULT 1",
-        )
-
-        self._add_column_if_missing(
-            "ai_config",
-            "allow_channel_management",
-            "INTEGER DEFAULT 1",
-        )
-
-        self._add_column_if_missing(
-            "ai_config",
-            "allow_role_management",
-            "INTEGER DEFAULT 1",
-        )
-
-        self._add_column_if_missing(
-            "ai_config",
-            "updated_at",
-            "TEXT",
-        )
+        for column, definition in ai_config_columns.items():
+            self._add_column_if_missing(
+                "ai_config",
+                column,
+                definition,
+            )
 
         # ----------------------------------------------------
         # ADVANCED SETTINGS
         # ----------------------------------------------------
 
-        self._add_column_if_missing(
-            "ai_advanced_settings",
-            "memory_enabled",
-            "INTEGER DEFAULT 1",
-        )
+        advanced_columns = {
+            "memory_enabled": "INTEGER DEFAULT 1",
+            "history_limit": "INTEGER DEFAULT 20",
+            "response_length": "INTEGER DEFAULT 1200",
+            "timeout": "INTEGER DEFAULT 35",
+            "security_enabled": "INTEGER DEFAULT 1",
+            "bot_chat_enabled": "INTEGER DEFAULT 1",
+            "bot_chat_max_chain": "INTEGER DEFAULT 6",
+            "bot_chat_cooldown": "REAL DEFAULT 2.0",
+            "allow_members": "TEXT DEFAULT '[]'",
+            "deny_members": "TEXT DEFAULT '[]'",
+            "sensitive_keywords": "TEXT DEFAULT '[]'",
+            "updated_at": "TEXT",
+        }
 
-        self._add_column_if_missing(
-            "ai_advanced_settings",
-            "history_limit",
-            "INTEGER DEFAULT 20",
-        )
-
-        self._add_column_if_missing(
-            "ai_advanced_settings",
-            "response_length",
-            "INTEGER DEFAULT 1200",
-        )
-
-        self._add_column_if_missing(
-            "ai_advanced_settings",
-            "timeout",
-            "INTEGER DEFAULT 35",
-        )
-
-        self._add_column_if_missing(
-            "ai_advanced_settings",
-            "security_enabled",
-            "INTEGER DEFAULT 1",
-        )
-
-        self._add_column_if_missing(
-            "ai_advanced_settings",
-            "bot_chat_enabled",
-            "INTEGER DEFAULT 1",
-        )
-
-        self._add_column_if_missing(
-            "ai_advanced_settings",
-            "bot_chat_max_chain",
-            "INTEGER DEFAULT 6",
-        )
-
-        self._add_column_if_missing(
-            "ai_advanced_settings",
-            "bot_chat_cooldown",
-            "REAL DEFAULT 2.0",
-        )
-
-        self._add_column_if_missing(
-            "ai_advanced_settings",
-            "allow_members",
-            "TEXT DEFAULT '[]'",
-        )
-
-        self._add_column_if_missing(
-            "ai_advanced_settings",
-            "deny_members",
-            "TEXT DEFAULT '[]'",
-        )
-
-        self._add_column_if_missing(
-            "ai_advanced_settings",
-            "sensitive_keywords",
-            "TEXT DEFAULT '[]'",
-        )
-
-        self._add_column_if_missing(
-            "ai_advanced_settings",
-            "updated_at",
-            "TEXT",
-        )
+        for column, definition in advanced_columns.items():
+            self._add_column_if_missing(
+                "ai_advanced_settings",
+                column,
+                definition,
+            )
 
         self.conn.commit()
 
@@ -729,7 +566,6 @@ class Database:
 
         now = utc_now()
 
-        # Fill missing character dates.
         self.conn.execute(
             """
             UPDATE characters
@@ -739,7 +575,6 @@ class Database:
             (now,),
         )
 
-        # Normalize empty character providers.
         self.conn.execute(
             """
             UPDATE characters
@@ -749,7 +584,6 @@ class Database:
             """
         )
 
-        # Normalize empty models.
         self.conn.execute(
             """
             UPDATE characters
@@ -760,7 +594,6 @@ class Database:
             (CURRENT_GOOGLE_MODEL,),
         )
 
-        # Normalize AI config.
         self.conn.execute(
             """
             UPDATE ai_config
@@ -780,7 +613,6 @@ class Database:
             (CURRENT_GOOGLE_MODEL,),
         )
 
-        # Normalize guild settings.
         self.conn.execute(
             """
             UPDATE guild_settings
@@ -921,6 +753,25 @@ class Database:
             guild_id
         )
 
+    def get_user_characters(
+        self,
+        guild_id: int,
+        user_id: int,
+    ):
+        return self.conn.execute(
+            """
+            SELECT *
+            FROM characters
+            WHERE guild_id = ?
+              AND created_by = ?
+            ORDER BY name COLLATE NOCASE ASC
+            """,
+            (
+                guild_id,
+                user_id,
+            ),
+        ).fetchall()
+
     def update_character(
         self,
         guild_id: int,
@@ -980,7 +831,6 @@ class Database:
         guild_id: int,
         name: str,
     ):
-        # System characters cannot be deleted.
         character = self.get_character(
             guild_id,
             name,
@@ -1153,7 +1003,6 @@ class Database:
                 name,
             )
 
-        # Create default system character.
         existing = self.get_character(
             guild_id,
             DEFAULT_SERVER_CHARACTER,
@@ -1216,10 +1065,6 @@ class Database:
                 "allow_channel_management": 1,
                 "allow_role_management": 1,
             }
-
-        # ----------------------------------------------------
-        # Compatibility aliases
-        # ----------------------------------------------------
 
         result["ai_enabled"] = result.get(
             "enabled",
@@ -1316,21 +1161,14 @@ class Database:
                 )
 
         if "provider" in updates:
-            updates["provider"] = (
-                str(
-                    updates["provider"]
-                )
-                .strip()
-                .lower()
-            )
+            updates["provider"] = str(
+                updates["provider"]
+            ).strip().lower()
 
         if "model" in updates:
-            updates["model"] = (
-                str(
-                    updates["model"]
-                )
-                .strip()
-            )
+            updates["model"] = str(
+                updates["model"]
+            ).strip()
 
         if not updates.get("model"):
             updates["model"] = CURRENT_GOOGLE_MODEL
@@ -1371,17 +1209,9 @@ class Database:
             )
 
         else:
-            fields = [
-                "guild_id"
-            ]
-
-            values = [
-                guild_id
-            ]
-
-            placeholders = [
-                "?"
-            ]
+            fields = ["guild_id"]
+            values = [guild_id]
+            placeholders = ["?"]
 
             for key, value in updates.items():
                 fields.append(key)
@@ -1401,7 +1231,7 @@ class Database:
             )
 
         # ----------------------------------------------------
-        # Keep guild_settings synchronized.
+        # Synchronize guild_settings
         # ----------------------------------------------------
 
         guild_updates = {}
@@ -1442,9 +1272,7 @@ class Database:
             ] = updates["reply_type"]
 
         if guild_updates:
-            guild_updates[
-                "updated_at"
-            ] = now
+            guild_updates["updated_at"] = now
 
             existing_guild = self.conn.execute(
                 """
@@ -1478,17 +1306,9 @@ class Database:
                 )
 
             else:
-                fields = [
-                    "guild_id"
-                ]
-
-                values = [
-                    guild_id
-                ]
-
-                placeholders = [
-                    "?"
-                ]
+                fields = ["guild_id"]
+                values = [guild_id]
+                placeholders = ["?"]
 
                 for key, value in guild_updates.items():
                     fields.append(key)
@@ -1510,6 +1330,35 @@ class Database:
         self.conn.commit()
 
         return True
+
+    # ========================================================
+    # GUILD CONFIG COMPATIBILITY
+    # ========================================================
+
+    def get_guild_config(
+        self,
+        guild_id: int,
+    ):
+        """
+        Compatibility wrapper for main.py.
+        Uses the unified AI configuration.
+        """
+        return self.get_ai_config(
+            guild_id
+        )
+
+    def update_guild_config(
+        self,
+        guild_id: int,
+        **kwargs,
+    ):
+        """
+        Compatibility wrapper for main.py.
+        """
+        return self.save_ai_config(
+            guild_id,
+            **kwargs,
+        )
 
     # ========================================================
     # ADVANCED AI SETTINGS
@@ -1583,12 +1432,8 @@ class Database:
 
         result["memory_enabled"] = bool(
             normalize_bool(
-                data.get(
-                    "memory_enabled"
-                ),
-                defaults[
-                    "memory_enabled"
-                ],
+                data.get("memory_enabled"),
+                defaults["memory_enabled"],
             )
         )
 
@@ -1598,9 +1443,7 @@ class Database:
                 int(
                     data.get(
                         "history_limit",
-                        defaults[
-                            "history_limit"
-                        ],
+                        defaults["history_limit"],
                     )
                 ),
                 100,
@@ -1613,9 +1456,7 @@ class Database:
                 int(
                     data.get(
                         "response_length",
-                        defaults[
-                            "response_length"
-                        ],
+                        defaults["response_length"],
                     )
                 ),
                 4000,
@@ -1628,9 +1469,7 @@ class Database:
                 int(
                     data.get(
                         "timeout",
-                        defaults[
-                            "timeout"
-                        ],
+                        defaults["timeout"],
                     )
                 ),
                 180,
@@ -1639,23 +1478,15 @@ class Database:
 
         result["security_enabled"] = bool(
             normalize_bool(
-                data.get(
-                    "security_enabled"
-                ),
-                defaults[
-                    "security_enabled"
-                ],
+                data.get("security_enabled"),
+                defaults["security_enabled"],
             )
         )
 
         result["bot_chat_enabled"] = bool(
             normalize_bool(
-                data.get(
-                    "bot_chat_enabled"
-                ),
-                defaults[
-                    "bot_chat_enabled"
-                ],
+                data.get("bot_chat_enabled"),
+                defaults["bot_chat_enabled"],
             )
         )
 
@@ -1665,9 +1496,7 @@ class Database:
                 int(
                     data.get(
                         "bot_chat_max_chain",
-                        defaults[
-                            "bot_chat_max_chain"
-                        ],
+                        defaults["bot_chat_max_chain"],
                     )
                 ),
                 50,
@@ -1680,9 +1509,7 @@ class Database:
                 float(
                     data.get(
                         "bot_chat_cooldown",
-                        defaults[
-                            "bot_chat_cooldown"
-                        ],
+                        defaults["bot_chat_cooldown"],
                     )
                 ),
                 60.0,
@@ -1693,9 +1520,7 @@ class Database:
             int(x)
             for x in normalize_list(
                 safe_json_loads(
-                    data.get(
-                        "allow_members"
-                    ),
+                    data.get("allow_members"),
                     [],
                 )
             )
@@ -1706,9 +1531,7 @@ class Database:
             int(x)
             for x in normalize_list(
                 safe_json_loads(
-                    data.get(
-                        "deny_members"
-                    ),
+                    data.get("deny_members"),
                     [],
                 )
             )
@@ -1716,9 +1539,7 @@ class Database:
         ]
 
         keywords = safe_json_loads(
-            data.get(
-                "sensitive_keywords"
-            ),
+            data.get("sensitive_keywords"),
             [],
         )
 
@@ -1765,10 +1586,6 @@ class Database:
 
         if not updates:
             return False
-
-        # ----------------------------------------------------
-        # Normalize
-        # ----------------------------------------------------
 
         if "memory_enabled" in updates:
             updates["memory_enabled"] = normalize_bool(
@@ -1885,10 +1702,6 @@ class Database:
                 if str(x).strip()
             ]
 
-        # ----------------------------------------------------
-        # JSON encoding
-        # ----------------------------------------------------
-
         for key in (
             "allow_members",
             "deny_members",
@@ -1934,17 +1747,9 @@ class Database:
             )
 
         else:
-            fields = [
-                "guild_id"
-            ]
-
-            values = [
-                guild_id
-            ]
-
-            placeholders = [
-                "?"
-            ]
+            fields = ["guild_id"]
+            values = [guild_id]
+            placeholders = ["?"]
 
             for key, value in updates.items():
                 fields.append(key)
@@ -2019,6 +1824,27 @@ class Database:
 
         self.conn.commit()
 
+    def save_message(
+        self,
+        guild_id: int,
+        channel_id: int,
+        user_id: int,
+        character_name: str,
+        role: str,
+        content: str,
+    ):
+        """
+        Compatibility wrapper for main.py.
+        """
+        return self.add_message(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=user_id,
+            character_name=character_name,
+            role=role,
+            content=content,
+        )
+
     def get_history(
         self,
         guild_id: int,
@@ -2026,10 +1852,6 @@ class Database:
         user_id: int,
         limit: int = 20,
     ):
-        # ----------------------------------------------------
-        # Compatibility with older positional order.
-        # ----------------------------------------------------
-
         try:
             limit = int(limit)
         except Exception:
