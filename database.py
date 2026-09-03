@@ -16,23 +16,17 @@ class Database:
     CURRENT_GOOGLE_MODEL = "gemini-3.5-flash-lite"
 
     DM_GUILD_ID = 0
-
     DM_CHARACTER_NAME = "مساعد MyAI"
 
     DEFAULT_CHARACTER_TYPE = "normal"
-
 
     # ======================================================
     # INITIALIZATION
     # ======================================================
 
-    def __init__(
-        self,
-        db_path="myai.db"
-    ):
+    def __init__(self, db_path="myai.db"):
 
         self.db_path = db_path
-
         self.lock = threading.RLock()
 
         self.conn = sqlite3.connect(
@@ -47,57 +41,31 @@ class Database:
         # --------------------------------------------------
 
         try:
-
-            self.conn.execute(
-                "PRAGMA journal_mode=WAL"
-            )
-
+            self.conn.execute("PRAGMA journal_mode=WAL")
         except Exception as e:
-
-            print(
-                f"⚠️ SQLite WAL warning: {e}"
-            )
+            print(f"⚠️ SQLite WAL warning: {e}")
 
         try:
-
-            self.conn.execute(
-                "PRAGMA synchronous=NORMAL"
-            )
-
+            self.conn.execute("PRAGMA synchronous=NORMAL")
         except Exception:
             pass
 
         try:
-
-            self.conn.execute(
-                "PRAGMA busy_timeout=5000"
-            )
-
+            self.conn.execute("PRAGMA busy_timeout=5000")
         except Exception:
             pass
 
         # --------------------------------------------------
-        # Tables
+        # Tables / migrations
         # --------------------------------------------------
 
         self._create_tables()
-
-        # --------------------------------------------------
-        # Safe migrations
-        # --------------------------------------------------
-
         self._repair_characters_table()
-
         self._repair_messages_table()
-
         self._repair_settings_tables()
-
         self._create_dm_tables()
-
         self._ensure_dm_character()
-
         self._migrate_old_models()
-
 
     # ======================================================
     # BASIC SQL EXECUTOR
@@ -119,29 +87,21 @@ class Database:
 
             try:
 
-                cursor.execute(
-                    query,
-                    params
-                )
+                cursor.execute(query, params)
 
                 if commit:
-
                     self.conn.commit()
 
                 if fetchone:
-
                     return cursor.fetchone()
 
                 if fetchall:
-
                     return cursor.fetchall()
 
                 return None
 
             finally:
-
                 cursor.close()
-
 
     # ======================================================
     # TABLE CREATION
@@ -177,10 +137,7 @@ class Database:
 
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 
-                    UNIQUE (
-                        guild_id,
-                        name
-                    )
+                    UNIQUE(guild_id, name)
                 )
                 """
             )
@@ -272,11 +229,13 @@ class Database:
 
             self.conn.execute(
                 """
-                CREATE INDEX IF NOT EXISTS
-                idx_messages_guild_channel
-                ON messages (
-                    guild_id,
-                    channel_id
+                CREATE TABLE IF NOT EXISTS ai_dm_settings (
+
+                    user_id INTEGER PRIMARY KEY,
+
+                    enabled INTEGER DEFAULT 0,
+
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
@@ -284,16 +243,20 @@ class Database:
             self.conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS
+                idx_messages_guild_channel
+                ON messages(guild_id, channel_id)
+                """
+            )
+
+            self.conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS
                 idx_messages_character
-                ON messages (
-                    guild_id,
-                    character_name
-                )
+                ON messages(guild_id, character_name)
                 """
             )
 
             self.conn.commit()
-
 
     # ======================================================
     # CHARACTER TABLE MIGRATION
@@ -314,8 +277,7 @@ class Database:
 
                 "created_by": (
                     "ALTER TABLE characters "
-                    "ADD COLUMN created_by "
-                    "INTEGER DEFAULT 0"
+                    "ADD COLUMN created_by INTEGER DEFAULT 0"
                 ),
 
                 "created_at": (
@@ -332,8 +294,7 @@ class Database:
 
                 "model": (
                     "ALTER TABLE characters "
-                    "ADD COLUMN model "
-                    "TEXT DEFAULT ''"
+                    "ADD COLUMN model TEXT DEFAULT ''"
                 ),
 
                 "character_type": (
@@ -362,9 +323,7 @@ class Database:
 
                 try:
 
-                    self.conn.execute(
-                        query
-                    )
+                    self.conn.execute(query)
 
                     print(
                         f"🛠️ Added characters column: {column}"
@@ -377,9 +336,9 @@ class Database:
                         f"for {column}: {e}"
                     )
 
-            # ------------------------------------------------
+            # --------------------------------------------------
             # Normalize NULL values
-            # ------------------------------------------------
+            # --------------------------------------------------
 
             try:
 
@@ -432,9 +391,7 @@ class Database:
                     WHERE model IS NULL
                        OR TRIM(model) = ''
                     """,
-                    (
-                        self.CURRENT_GOOGLE_MODEL,
-                    )
+                    (self.CURRENT_GOOGLE_MODEL,)
                 )
 
                 self.conn.execute(
@@ -452,7 +409,6 @@ class Database:
                 print(
                     f"⚠️ Character normalization warning: {e}"
                 )
-
 
     # ======================================================
     # MESSAGE TABLE MIGRATION
@@ -480,12 +436,9 @@ class Database:
             }
 
             if required.issubset(columns):
-
                 return
 
-            print(
-                "🛠️ Repairing messages table..."
-            )
+            print("🛠️ Repairing messages table...")
 
             self.conn.execute(
                 """
@@ -510,8 +463,6 @@ class Database:
                 """
             )
 
-            existing = columns
-
             selectable = []
 
             for column in [
@@ -524,55 +475,39 @@ class Database:
                 "created_at",
             ]:
 
-                if column in existing:
+                if column in columns:
+
+                    selectable.append(column)
+
+                elif column == "guild_id":
+
+                    selectable.append("0 AS guild_id")
+
+                elif column == "channel_id":
+
+                    selectable.append("0 AS channel_id")
+
+                elif column == "user_id":
+
+                    selectable.append("0 AS user_id")
+
+                elif column == "character_name":
+
+                    selectable.append("NULL AS character_name")
+
+                elif column == "role":
+
+                    selectable.append("'user' AS role")
+
+                elif column == "content":
+
+                    selectable.append("'' AS content")
+
+                elif column == "created_at":
 
                     selectable.append(
-                        column
+                        "CURRENT_TIMESTAMP AS created_at"
                     )
-
-                else:
-
-                    if column == "guild_id":
-
-                        selectable.append(
-                            "0 AS guild_id"
-                        )
-
-                    elif column == "channel_id":
-
-                        selectable.append(
-                            "0 AS channel_id"
-                        )
-
-                    elif column == "user_id":
-
-                        selectable.append(
-                            "0 AS user_id"
-                        )
-
-                    elif column == "character_name":
-
-                        selectable.append(
-                            "NULL AS character_name"
-                        )
-
-                    elif column == "role":
-
-                        selectable.append(
-                            "'user' AS role"
-                        )
-
-                    elif column == "content":
-
-                        selectable.append(
-                            "'' AS content"
-                        )
-
-                    elif column == "created_at":
-
-                        selectable.append(
-                            "CURRENT_TIMESTAMP AS created_at"
-                        )
 
             self.conn.execute(
                 """
@@ -589,29 +524,21 @@ class Database:
                     {fields}
                 FROM messages
                 """.format(
-                    fields=", ".join(
-                        selectable
-                    )
+                    fields=", ".join(selectable)
                 )
             )
 
-            self.conn.execute(
-                "DROP TABLE messages"
-            )
+            self.conn.execute("DROP TABLE messages")
 
             self.conn.execute(
-                "ALTER TABLE messages_new "
-                "RENAME TO messages"
+                "ALTER TABLE messages_new RENAME TO messages"
             )
 
             self.conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS
                 idx_messages_guild_channel
-                ON messages (
-                    guild_id,
-                    channel_id
-                )
+                ON messages(guild_id, channel_id)
                 """
             )
 
@@ -619,15 +546,11 @@ class Database:
                 """
                 CREATE INDEX IF NOT EXISTS
                 idx_messages_character
-                ON messages (
-                    guild_id,
-                    character_name
-                )
+                ON messages(guild_id, character_name)
                 """
             )
 
             self.conn.commit()
-
 
     # ======================================================
     # SETTINGS TABLE MIGRATION
@@ -637,9 +560,9 @@ class Database:
 
         with self.lock:
 
-            # ------------------------------------------------
+            # --------------------------------------------------
             # guild_settings
-            # ------------------------------------------------
+            # --------------------------------------------------
 
             guild_columns = {
                 row["name"]
@@ -669,8 +592,7 @@ class Database:
 
                 "ai_enabled": (
                     "ALTER TABLE guild_settings "
-                    "ADD COLUMN ai_enabled "
-                    "INTEGER DEFAULT 0"
+                    "ADD COLUMN ai_enabled INTEGER DEFAULT 0"
                 ),
 
                 "ai_channel_id": (
@@ -715,10 +637,7 @@ class Database:
                     continue
 
                 try:
-
-                    self.conn.execute(
-                        query
-                    )
+                    self.conn.execute(query)
 
                 except Exception as e:
 
@@ -727,9 +646,9 @@ class Database:
                         f"{column}: {e}"
                     )
 
-            # ------------------------------------------------
+            # --------------------------------------------------
             # ai_config
-            # ------------------------------------------------
+            # --------------------------------------------------
 
             ai_columns = {
                 row["name"]
@@ -815,10 +734,7 @@ class Database:
                     continue
 
                 try:
-
-                    self.conn.execute(
-                        query
-                    )
+                    self.conn.execute(query)
 
                 except Exception as e:
 
@@ -828,7 +744,6 @@ class Database:
                     )
 
             self.conn.commit()
-
 
     # ======================================================
     # DM TABLES
@@ -853,7 +768,6 @@ class Database:
 
             self.conn.commit()
 
-
     # ======================================================
     # DEFAULT DM CHARACTER
     # ======================================================
@@ -866,7 +780,6 @@ class Database:
         )
 
         if existing:
-
             return
 
         try:
@@ -908,7 +821,6 @@ class Database:
                 f"⚠️ DM character creation warning: {e}"
             )
 
-
     # ======================================================
     # MODEL MIGRATION
     # ======================================================
@@ -922,8 +834,7 @@ class Database:
         )
 
         placeholders = ",".join(
-            "?"
-            for _ in old_models
+            "?" for _ in old_models
         )
 
         with self.lock:
@@ -974,19 +885,14 @@ class Database:
                     f"⚠️ Model migration warning: {e}"
                 )
 
-
     # ======================================================
     # CHARACTER VALIDATION
     # ======================================================
 
     @staticmethod
-    def _validate_character_name(
-        name
-    ):
+    def _validate_character_name(name):
 
-        name = str(
-            name or ""
-        ).strip()
+        name = str(name or "").strip()
 
         if not name:
 
@@ -1002,7 +908,6 @@ class Database:
 
         return name
 
-
     @staticmethod
     def _validate_text(
         value,
@@ -1010,9 +915,7 @@ class Database:
         max_length
     ):
 
-        value = str(
-            value or ""
-        ).strip()
+        value = str(value or "").strip()
 
         if len(value) > max_length:
 
@@ -1023,7 +926,6 @@ class Database:
 
         return value
 
-
     # ======================================================
     # CHARACTER CREATE
     # ======================================================
@@ -1032,7 +934,7 @@ class Database:
         self,
         guild_id,
         name,
-        personality,
+        personality="",
         provider="google",
         model=None,
         created_by=0,
@@ -1041,9 +943,7 @@ class Database:
         speaking_style=""
     ):
 
-        name = self._validate_character_name(
-            name
-        )
+        name = self._validate_character_name(name)
 
         personality = self._validate_text(
             personality,
@@ -1083,13 +983,9 @@ class Database:
         ).strip()
 
         try:
-
-            created_by = int(
-                created_by or 0
-            )
+            created_by = int(created_by or 0)
 
         except Exception:
-
             created_by = 0
 
         with self.lock:
@@ -1099,7 +995,6 @@ class Database:
                 cursor = self.conn.execute(
                     """
                     INSERT INTO characters (
-
                         guild_id,
                         name,
                         personality,
@@ -1110,11 +1005,9 @@ class Database:
                         model,
                         created_by,
                         created_at
-
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-
                     (
                         int(guild_id),
                         name,
@@ -1139,19 +1032,14 @@ class Database:
                     f"الشخصية **{name}** موجودة بالفعل."
                 )
 
-            row = self.conn.execute(
+            return self.conn.execute(
                 """
                 SELECT *
                 FROM characters
                 WHERE id = ?
                 """,
-                (
-                    character_id,
-                )
+                (character_id,)
             ).fetchone()
-
-            return row
-
 
     # ======================================================
     # GET CHARACTER
@@ -1181,7 +1069,6 @@ class Database:
             fetchone=True
         )
 
-
     # ======================================================
     # GET CHARACTER BY ID
     # ======================================================
@@ -1207,15 +1094,11 @@ class Database:
             fetchone=True
         )
 
-
     # ======================================================
     # GET CHARACTERS
     # ======================================================
 
-    def get_characters(
-        self,
-        guild_id
-    ):
+    def get_characters(self, guild_id):
 
         return self._execute(
             """
@@ -1224,26 +1107,17 @@ class Database:
             WHERE guild_id = ?
             ORDER BY id ASC
             """,
-            (
-                int(guild_id),
-            ),
+            (int(guild_id),),
             fetchall=True
         )
-
 
     # ======================================================
     # LIST CHARACTERS
     # ======================================================
 
-    def list_characters(
-        self,
-        guild_id
-    ):
+    def list_characters(self, guild_id):
 
-        return self.get_characters(
-            guild_id
-        )
-
+        return self.get_characters(guild_id)
 
     # ======================================================
     # UPDATE CHARACTER
@@ -1274,34 +1148,21 @@ class Database:
                 "الشخصية غير موجودة."
             )
 
-        owner_id = int(
-            character["created_by"] or 0
-        )
-
-        try:
-
-            editor_id = int(
-                editor_id
-                or 0
-            )
-
-        except Exception:
-
-            editor_id = 0
-
-        # --------------------------------------------------
-        # Protect system character
-        # --------------------------------------------------
-
         if int(guild_id) == self.DM_GUILD_ID:
 
             raise PermissionError(
                 "لا يمكن تعديل شخصية النظام."
             )
 
-        # --------------------------------------------------
-        # Owner verification
-        # --------------------------------------------------
+        owner_id = int(
+            character["created_by"] or 0
+        )
+
+        try:
+            editor_id = int(editor_id or 0)
+
+        except Exception:
+            editor_id = 0
 
         if owner_id != editor_id:
 
@@ -1309,12 +1170,7 @@ class Database:
                 "لا يمكنك تعديل شخصية شخص آخر."
             )
 
-        # --------------------------------------------------
-        # Build update
-        # --------------------------------------------------
-
         fields = []
-
         values = []
 
         if personality is not None:
@@ -1325,32 +1181,19 @@ class Database:
                 2000
             )
 
-            fields.append(
-                "personality = ?"
-            )
-
-            values.append(
-                personality
-            )
+            fields.append("personality = ?")
+            values.append(personality)
 
         if provider is not None:
 
-            fields.append(
-                "provider = ?"
-            )
-
+            fields.append("provider = ?")
             values.append(
-                str(
-                    provider
-                ).strip().lower()
+                str(provider).strip().lower()
             )
 
         if model is not None:
 
-            fields.append(
-                "model = ?"
-            )
-
+            fields.append("model = ?")
             values.append(
                 str(model).strip()
             )
@@ -1363,16 +1206,8 @@ class Database:
                 50
             )
 
-            fields.append(
-                "character_type = ?"
-            )
-
-            values.append(
-                character_type
-            )
-
-            # Keep personality synchronized
-            # only when changing type.
+            fields.append("character_type = ?")
+            values.append(character_type)
 
         if custom_instructions is not None:
 
@@ -1438,7 +1273,6 @@ class Database:
             name
         )
 
-
     # ======================================================
     # DELETE CHARACTER
     # OWNER ONLY
@@ -1473,14 +1307,11 @@ class Database:
         )
 
         try:
-
             requester_id = int(
-                requester_id
-                or 0
+                requester_id or 0
             )
 
         except Exception:
-
             requester_id = 0
 
         if owner_id != requester_id:
@@ -1502,15 +1333,6 @@ class Database:
                     str(name).strip()
                 )
             )
-
-            self.conn.commit()
-
-        # --------------------------------------------------
-        # If deleted character was active,
-        # clear the active selection.
-        # --------------------------------------------------
-
-        try:
 
             self.conn.execute(
                 """
@@ -1542,23 +1364,13 @@ class Database:
 
             self.conn.commit()
 
-        except Exception as e:
-
-            print(
-                f"⚠️ Active character cleanup warning: {e}"
-            )
-
         return True
-
 
     # ======================================================
     # AI CONFIG
     # ======================================================
 
-    def get_ai_config(
-        self,
-        guild_id
-    ):
+    def get_ai_config(self, guild_id):
 
         row = self._execute(
             """
@@ -1567,26 +1379,18 @@ class Database:
             WHERE guild_id = ?
             LIMIT 1
             """,
-            (
-                int(guild_id),
-            ),
+            (int(guild_id),),
             fetchone=True
         )
 
         if row:
-
             return row
-
-        # --------------------------------------------------
-        # Create default config
-        # --------------------------------------------------
 
         with self.lock:
 
             self.conn.execute(
                 """
                 INSERT OR IGNORE INTO ai_config (
-
                     guild_id,
                     enabled,
                     channel_id,
@@ -1599,11 +1403,21 @@ class Database:
                     allow_management,
                     allow_channel_management,
                     allow_role_management
-
                 )
-                VALUES (?, 0, NULL, 'normal', 'mention',
-                        NULL, 'management', 'google', ?,
-                        1, 0, 0)
+                VALUES (
+                    ?,
+                    0,
+                    NULL,
+                    'normal',
+                    'mention',
+                    NULL,
+                    'management',
+                    'google',
+                    ?,
+                    1,
+                    0,
+                    0
+                )
                 """,
                 (
                     int(guild_id),
@@ -1620,26 +1434,17 @@ class Database:
             WHERE guild_id = ?
             LIMIT 1
             """,
-            (
-                int(guild_id),
-            ),
+            (int(guild_id),),
             fetchone=True
         )
-
 
     # ======================================================
     # GUILD CONFIG ALIAS
     # ======================================================
 
-    def get_guild_config(
-        self,
-        guild_id
-    ):
+    def get_guild_config(self, guild_id):
 
-        return self.get_ai_config(
-            guild_id
-        )
-
+        return self.get_ai_config(guild_id)
 
     # ======================================================
     # SAVE AI CONFIG
@@ -1666,7 +1471,6 @@ class Database:
         }
 
         updates = []
-
         values = []
 
         for key, value in kwargs.items():
@@ -1682,23 +1486,17 @@ class Database:
                 f"{key} = ?"
             )
 
-            values.append(
-                value
-            )
+            values.append(value)
 
         if not updates:
 
-            return self.get_ai_config(
-                guild_id
-            )
+            return self.get_ai_config(guild_id)
 
         updates.append(
             "updated_at = CURRENT_TIMESTAMP"
         )
 
-        values.append(
-            int(guild_id)
-        )
+        values.append(int(guild_id))
 
         with self.lock:
 
@@ -1729,10 +1527,7 @@ class Database:
 
             self.conn.commit()
 
-        return self.get_ai_config(
-            guild_id
-        )
-
+        return self.get_ai_config(guild_id)
 
     # ======================================================
     # GUILD SETTINGS
@@ -1772,47 +1567,34 @@ class Database:
         }
 
         updates = []
-
         values = []
 
         for key, value in kwargs.items():
 
-            column = mapping.get(
-                key
-            )
+            column = mapping.get(key)
 
             if not column:
                 continue
 
             if key == "enabled":
 
-                value = (
-                    1
-                    if value
-                    else 0
-                )
+                value = 1 if value else 0
 
             updates.append(
                 f"{column} = ?"
             )
 
-            values.append(
-                value
-            )
+            values.append(value)
 
         if not updates:
 
-            return self.get_guild_config(
-                guild_id
-            )
+            return self.get_guild_config(guild_id)
 
         updates.append(
             "updated_at = CURRENT_TIMESTAMP"
         )
 
-        values.append(
-            int(guild_id)
-        )
+        values.append(int(guild_id))
 
         with self.lock:
 
@@ -1823,9 +1605,7 @@ class Database:
                 )
                 VALUES (?)
                 """,
-                (
-                    int(guild_id),
-                )
+                (int(guild_id),)
             )
 
             self.conn.execute(
@@ -1839,19 +1619,13 @@ class Database:
 
             self.conn.commit()
 
-        return self.get_guild_settings(
-            guild_id
-        )
-
+        return self.get_guild_settings(guild_id)
 
     # ======================================================
     # GUILD SETTINGS GET
     # ======================================================
 
-    def get_guild_settings(
-        self,
-        guild_id
-    ):
+    def get_guild_settings(self, guild_id):
 
         row = self._execute(
             """
@@ -1860,14 +1634,11 @@ class Database:
             WHERE guild_id = ?
             LIMIT 1
             """,
-            (
-                int(guild_id),
-            ),
+            (int(guild_id),),
             fetchone=True
         )
 
         if row:
-
             return row
 
         with self.lock:
@@ -1896,12 +1667,9 @@ class Database:
             WHERE guild_id = ?
             LIMIT 1
             """,
-            (
-                int(guild_id),
-            ),
+            (int(guild_id),),
             fetchone=True
         )
-
 
     # ======================================================
     # ACTIVE CHARACTER
@@ -1998,28 +1766,20 @@ class Database:
             "character_name": character_name
         }
 
-
     # ======================================================
     # GET ACTIVE CHARACTER
     # ======================================================
 
-    def get_active_character(
-        self,
-        guild_id
-    ):
+    def get_active_character(self, guild_id):
 
-        config = self.get_ai_config(
-            guild_id
-        )
+        config = self.get_ai_config(guild_id)
 
         if not config:
-
             return None
 
         character_name = config["character_name"]
 
         if not character_name:
-
             return None
 
         return self.get_character(
@@ -2027,9 +1787,8 @@ class Database:
             character_name
         )
 
-
     # ======================================================
-    # HISTORY
+    # MESSAGE HISTORY
     # ======================================================
 
     def add_message(
@@ -2042,9 +1801,7 @@ class Database:
         content
     ):
 
-        content = str(
-            content or ""
-        ).strip()
+        content = str(content or "").strip()
 
         if not content:
             return None
@@ -2054,7 +1811,6 @@ class Database:
             cursor = self.conn.execute(
                 """
                 INSERT INTO messages (
-
                     guild_id,
                     channel_id,
                     user_id,
@@ -2062,11 +1818,9 @@ class Database:
                     role,
                     content,
                     created_at
-
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-
                 (
                     int(guild_id),
                     int(channel_id),
@@ -2082,7 +1836,6 @@ class Database:
 
             return cursor.lastrowid
 
-
     def get_history(
         self,
         guild_id,
@@ -2095,10 +1848,7 @@ class Database:
 
             limit = max(
                 1,
-                min(
-                    int(limit),
-                    100
-                )
+                min(int(limit), 100)
             )
 
         except Exception:
@@ -2121,4 +1871,146 @@ class Database:
                 character_name,
                 limit
             ),
-            fetc
+            fetchall=True
+        )
+
+        return list(reversed(rows or []))
+
+    # ======================================================
+    # CLEAR HISTORY
+    # ======================================================
+
+    def clear_history(
+        self,
+        guild_id,
+        channel_id=None,
+        character_name=None
+    ):
+
+        conditions = ["guild_id = ?"]
+        values = [int(guild_id)]
+
+        if channel_id is not None:
+
+            conditions.append(
+                "channel_id = ?"
+            )
+
+            values.append(
+                int(channel_id)
+            )
+
+        if character_name is not None:
+
+            conditions.append(
+                "character_name = ?"
+            )
+
+            values.append(
+                str(character_name)
+            )
+
+        query = f"""
+            DELETE FROM messages
+            WHERE {" AND ".join(conditions)}
+        """
+
+        with self.lock:
+
+            cursor = self.conn.execute(
+                query,
+                tuple(values)
+            )
+
+            self.conn.commit()
+
+            return cursor.rowcount
+
+    # ======================================================
+    # AI MEMORY CLEAR ALIAS
+    # ======================================================
+
+    def clear_memory(
+        self,
+        guild_id,
+        channel_id=None,
+        character_name=None
+    ):
+
+        return self.clear_history(
+            guild_id,
+            channel_id,
+            character_name
+        )
+
+    # ======================================================
+    # DM AI
+    # ======================================================
+
+    def get_dm_enabled(self, user_id):
+
+        row = self._execute(
+            """
+            SELECT enabled
+            FROM ai_dm_settings
+            WHERE user_id = ?
+            LIMIT 1
+            """,
+            (int(user_id),),
+            fetchone=True
+        )
+
+        if not row:
+            return False
+
+        return bool(row["enabled"])
+
+    def set_dm_enabled(
+        self,
+        user_id,
+        enabled
+    ):
+
+        with self.lock:
+
+            self.conn.execute(
+                """
+                INSERT INTO ai_dm_settings (
+                    user_id,
+                    enabled,
+                    updated_at
+                )
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+
+                ON CONFLICT(user_id)
+                DO UPDATE SET
+                    enabled = excluded.enabled,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    int(user_id),
+                    1 if enabled else 0
+                )
+            )
+
+            self.conn.commit()
+
+        return bool(enabled)
+
+    # ======================================================
+    # CLOSE
+    # ======================================================
+
+    def close(self):
+
+        with self.lock:
+
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
+
+            try:
+                self.conn.close()
+            except Exception:
+                pass
