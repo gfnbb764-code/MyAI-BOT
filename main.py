@@ -193,10 +193,6 @@ ACTIVE_REQUESTS = set()
 # ============================================================
 
 def row_to_dict(row):
-    """
-    تحويل SQLite Row إلى dict.
-    """
-
     if row is None:
         return None
 
@@ -216,19 +212,11 @@ def row_to_dict(row):
 
 
 def get_config(guild_id: int):
-    """
-    جلب إعدادات السيرفر الأساسية.
-    """
-
     try:
-        config = db.get_guild_config(
-            guild_id
-        )
+        config = db.get_guild_config(guild_id)
     except Exception:
         try:
-            config = db.get_ai_config(
-                guild_id
-            )
+            config = db.get_ai_config(guild_id)
         except Exception:
             config = None
 
@@ -248,44 +236,28 @@ def get_config(guild_id: int):
 
     return {
         "guild_id": guild_id,
-
         "enabled": bool(
             data.get(
                 "enabled",
-                data.get(
-                    "ai_enabled",
-                    True
-                )
+                data.get("ai_enabled", True)
             )
         ),
-
         "channel_id": data.get(
             "channel_id",
-            data.get(
-                "ai_channel_id"
-            )
+            data.get("ai_channel_id")
         ),
-
         "mode": data.get(
             "mode",
-            data.get(
-                "ai_mode",
-                "normal"
-            )
+            data.get("ai_mode", "normal")
         ) or "normal",
-
         "reply_type": data.get(
             "reply_type",
             "mention"
         ) or "mention",
-
         "character": data.get(
             "character",
-            data.get(
-                "active_character"
-            )
+            data.get("active_character")
         ),
-
         "provider": data.get(
             "provider",
             data.get(
@@ -293,7 +265,6 @@ def get_config(guild_id: int):
                 PRIMARY_AI_PROVIDER
             )
         ) or PRIMARY_AI_PROVIDER,
-
         "model": data.get(
             "model",
             data.get(
@@ -304,14 +275,7 @@ def get_config(guild_id: int):
     }
 
 
-def update_config(
-    guild_id: int,
-    **kwargs
-):
-    """
-    تحديث إعدادات السيرفر مع توافق مع نسخ Database المختلفة.
-    """
-
+def update_config(guild_id: int, **kwargs):
     try:
         return db.update_guild_config(
             guild_id,
@@ -329,10 +293,6 @@ def update_config(
 
 
 def get_advanced(guild_id: int):
-    """
-    جلب الإعدادات المتقدمة.
-    """
-
     defaults = {
         "memory_enabled": True,
         "history_limit": 20,
@@ -344,15 +304,11 @@ def get_advanced(guild_id: int):
         "bot_chat_cooldown": DEFAULT_BOT_COOLDOWN,
         "allow_members": [],
         "deny_members": [],
-        "sensitive_keywords": (
-            DEFAULT_SENSITIVE_KEYWORDS.copy()
-        ),
+        "sensitive_keywords": DEFAULT_SENSITIVE_KEYWORDS.copy(),
     }
 
     try:
-        row = db.get_ai_advanced_settings(
-            guild_id
-        )
+        row = db.get_ai_advanced_settings(guild_id)
     except Exception:
         return defaults
 
@@ -360,7 +316,6 @@ def get_advanced(guild_id: int):
         return defaults
 
     data = row_to_dict(row)
-
     result = defaults.copy()
 
     for key in [
@@ -413,12 +368,7 @@ def get_advanced(guild_id: int):
     try:
         result["history_limit"] = max(
             0,
-            min(
-                100,
-                int(
-                    result["history_limit"]
-                )
-            )
+            min(100, int(result["history_limit"]))
         )
     except Exception:
         result["history_limit"] = 20
@@ -426,12 +376,7 @@ def get_advanced(guild_id: int):
     try:
         result["response_length"] = max(
             100,
-            min(
-                4000,
-                int(
-                    result["response_length"]
-                )
-            )
+            min(4000, int(result["response_length"]))
         )
     except Exception:
         result["response_length"] = 1200
@@ -439,12 +384,7 @@ def get_advanced(guild_id: int):
     try:
         result["timeout"] = max(
             10,
-            min(
-                180,
-                int(
-                    result["timeout"]
-                )
-            )
+            min(180, int(result["timeout"]))
         )
     except Exception:
         result["timeout"] = DEFAULT_AI_TIMEOUT
@@ -452,44 +392,23 @@ def get_advanced(guild_id: int):
     try:
         result["bot_chat_max_chain"] = max(
             1,
-            min(
-                50,
-                int(
-                    result["bot_chat_max_chain"]
-                )
-            )
+            min(50, int(result["bot_chat_max_chain"]))
         )
     except Exception:
-        result["bot_chat_max_chain"] = (
-            DEFAULT_MAX_BOT_CHAIN
-        )
+        result["bot_chat_max_chain"] = DEFAULT_MAX_BOT_CHAIN
 
     try:
         result["bot_chat_cooldown"] = max(
             0.0,
-            min(
-                60.0,
-                float(
-                    result["bot_chat_cooldown"]
-                )
-            )
+            min(60.0, float(result["bot_chat_cooldown"]))
         )
     except Exception:
-        result["bot_chat_cooldown"] = (
-            DEFAULT_BOT_COOLDOWN
-        )
+        result["bot_chat_cooldown"] = DEFAULT_BOT_COOLDOWN
 
     return result
 
 
-def save_advanced(
-    guild_id: int,
-    settings: dict
-):
-    """
-    حفظ الإعدادات المتقدمة.
-    """
-
+def save_advanced(guild_id: int, settings: dict):
     try:
         return db.save_ai_advanced_settings(
             guild_id,
@@ -504,23 +423,14 @@ def save_advanced(
         except Exception:
             traceback.print_exc()
             return False
-
     except Exception:
         traceback.print_exc()
         return False
 
 
-def reset_advanced(
-    guild_id: int
-):
-    """
-    إعادة الإعدادات المتقدمة للوضع الافتراضي.
-    """
-
+def reset_advanced(guild_id: int):
     try:
-        return db.reset_ai_advanced_settings(
-            guild_id
-        )
+        return db.reset_ai_advanced_settings(guild_id)
     except Exception:
         traceback.print_exc()
         return False
@@ -534,10 +444,6 @@ def get_character(
     guild_id: int,
     character_name: Optional[str]
 ):
-    """
-    جلب شخصية من السيرفر بالاسم.
-    """
-
     if not character_name:
         return None
 
@@ -548,31 +454,19 @@ def get_character(
         )
     except TypeError:
         try:
-            return db.get_character(
-                character_name
-            )
+            return db.get_character(character_name)
         except Exception:
             return None
     except Exception:
         return None
 
 
-def get_all_characters(
-    guild_id: int
-):
-    """
-    جلب جميع شخصيات السيرفر.
-    """
-
+def get_all_characters(guild_id: int):
     try:
-        return db.get_characters(
-            guild_id
-        )
+        return db.get_characters(guild_id)
     except Exception:
         try:
-            return db.list_characters(
-                guild_id
-            )
+            return db.list_characters(guild_id)
         except Exception:
             return []
 
@@ -581,10 +475,6 @@ def get_user_characters(
     guild_id: int,
     user_id: int
 ):
-    """
-    جلب الشخصيات التي يملكها المستخدم.
-    """
-
     try:
         return db.get_user_characters(
             guild_id,
@@ -598,40 +488,27 @@ def get_user_characters(
 # TEXT HELPERS
 # ============================================================
 
-def normalize_text(
-    text: str
-) -> str:
-    """
-    تنظيف النص للمقارنة.
-    """
-
+def normalize_text(text: str) -> str:
     if not text:
         return ""
 
     text = text.lower().strip()
 
-    text = re.sub(
+    return re.sub(
         r"\s+",
         " ",
         text
     )
-
-    return text
 
 
 def clean_mentions(
     message: discord.Message,
     content: str
 ) -> str:
-    """
-    إزالة منشن البوت من النص.
-    """
-
     if not content:
         return ""
 
     if bot.user:
-
         content = content.replace(
             f"<@{bot.user.id}>",
             ""
@@ -649,10 +526,6 @@ def split_message(
     text: str,
     limit: int = 1900
 ):
-    """
-    تقسيم الردود الطويلة.
-    """
-
     if not text:
         return []
 
@@ -683,9 +556,7 @@ def split_message(
             text[:split_at].strip()
         )
 
-        text = text[
-            split_at:
-        ].strip()
+        text = text[split_at:].strip()
 
     if text:
         chunks.append(text)
@@ -693,13 +564,7 @@ def split_message(
     return chunks
 
 
-def normalize_channel_id(
-    value
-):
-    """
-    تحويل channel_id إلى int.
-    """
-
+def normalize_channel_id(value):
     if value is None:
         return None
 
@@ -713,33 +578,17 @@ def channel_matches(
     message: discord.Message,
     channel_id
 ) -> bool:
-    """
-    التحقق من الروم المحدد.
-    """
-
-    channel_id = normalize_channel_id(
-        channel_id
-    )
+    channel_id = normalize_channel_id(channel_id)
 
     if channel_id is None:
         return True
 
-    return (
-        message.channel.id == channel_id
-    )
+    return message.channel.id == channel_id
 
-
-# ============================================================
-# BOT DIRECTED CHECK
-# ============================================================
 
 def is_directed_to_bot(
     message: discord.Message
 ) -> bool:
-    """
-    هل الرسالة موجهة للبوت؟
-    """
-
     if not bot.user:
         return False
 
@@ -754,13 +603,10 @@ def is_directed_to_bot(
         bot.user.name
     )
 
-    if (
+    return bool(
         bot_name
         and bot_name in content
-    ):
-        return True
-
-    return False
+    )
 
 
 # ============================================================
@@ -770,19 +616,10 @@ def is_directed_to_bot(
 def has_broad_management(
     member: discord.Member
 ) -> bool:
-    """
-    صلاحيات الإدارة العامة.
-    """
-
-    if (
-        member.guild.owner_id
-        == member.id
-    ):
+    if member.guild.owner_id == member.id:
         return True
 
-    permissions = (
-        member.guild_permissions
-    )
+    permissions = member.guild_permissions
 
     return any([
         permissions.administrator,
@@ -795,10 +632,6 @@ def has_broad_management(
 def get_top_three_roles(
     guild: discord.Guild
 ):
-    """
-    أعلى 3 رتب فعلية.
-    """
-
     roles = [
         role
         for role in guild.roles
@@ -817,10 +650,6 @@ def get_top_three_roles(
 def can_use_ai_dashboard(
     member: discord.Member
 ) -> bool:
-    """
-    أصحاب أعلى 3 رتب يستطيعون استخدام لوحة AI.
-    """
-
     top_roles = get_top_three_roles(
         member.guild
     )
@@ -834,10 +663,6 @@ def can_use_ai_dashboard(
 def security_check(
     member: discord.Member
 ) -> bool:
-    """
-    فحص صلاحيات الأمان.
-    """
-
     return (
         can_use_ai_dashboard(member)
         or has_broad_management(member)
@@ -860,9 +685,7 @@ def member_allowed(
         []
     ):
         try:
-            deny_members.add(
-                int(value)
-            )
+            deny_members.add(int(value))
         except Exception:
             pass
 
@@ -875,7 +698,6 @@ def member_allowed(
     )
 
     if allow_members:
-
         try:
             allow_ids = {
                 int(value)
@@ -904,9 +726,7 @@ def contains_sensitive_content(
     ):
         return False
 
-    text = normalize_text(
-        content
-    )
+    text = normalize_text(content)
 
     keywords = advanced.get(
         "sensitive_keywords",
@@ -919,10 +739,7 @@ def contains_sensitive_content(
             str(keyword)
         )
 
-        if (
-            keyword
-            and keyword in text
-        ):
+        if keyword and keyword in text:
             return True
 
     return False
@@ -948,36 +765,22 @@ def get_request_key(
 # BOT CHAT PROTECTION
 # ============================================================
 
-def get_bot_lock(
-    guild_id: int
-):
+def get_bot_lock(guild_id: int):
     if guild_id not in BOT_CHAT_LOCKS:
-        BOT_CHAT_LOCKS[guild_id] = (
-            asyncio.Lock()
-        )
+        BOT_CHAT_LOCKS[guild_id] = asyncio.Lock()
 
     return BOT_CHAT_LOCKS[guild_id]
 
 
-def get_bot_chain(
-    guild_id: int
-) -> int:
-    return BOT_CHAT_CHAINS.get(
-        guild_id,
-        0
-    )
+def get_bot_chain(guild_id: int) -> int:
+    return BOT_CHAT_CHAINS.get(guild_id, 0)
 
 
-def reset_bot_chain(
-    guild_id: int
-):
+def reset_bot_chain(guild_id: int):
     BOT_CHAT_CHAINS[guild_id] = 0
 
 
-def increment_bot_chain(
-    guild_id: int
-) -> int:
-
+def increment_bot_chain(guild_id: int) -> int:
     value = BOT_CHAT_CHAINS.get(
         guild_id,
         0
@@ -995,10 +798,8 @@ def bot_cooldown_active(
     cooldown: float
 ) -> bool:
 
-    last_response = (
-        BOT_CHAT_LAST_RESPONSE.get(
-            guild_id
-        )
+    last_response = BOT_CHAT_LAST_RESPONSE.get(
+        guild_id
     )
 
     if last_response is None:
@@ -1027,8 +828,7 @@ def should_process_bot_chat(
 
     if (
         bot.user
-        and message.author.id
-        == bot.user.id
+        and message.author.id == bot.user.id
     ):
         return False
 
@@ -1042,13 +842,8 @@ def should_process_bot_chat(
         DEFAULT_MAX_BOT_CHAIN
     )
 
-    if (
-        get_bot_chain(guild_id)
-        >= max_chain
-    ):
-        reset_bot_chain(
-            guild_id
-        )
+    if get_bot_chain(guild_id) >= max_chain:
+        reset_bot_chain(guild_id)
         return False
 
     cooldown = advanced.get(
@@ -1073,10 +868,6 @@ def save_database_message(
     message: discord.Message,
     character_name: Optional[str] = None
 ):
-    """
-    حفظ الرسالة بطريقة متوافقة مع Database.
-    """
-
     if not message.guild:
         return False
 
@@ -1180,28 +971,34 @@ async def generate_chat_reply(
     )
 
     if not prompt:
-        prompt = (
-            "رد على المستخدم بشكل طبيعي."
+        prompt = "رد على المستخدم بشكل طبيعي."
+
+    memory_enabled = bool(
+        advanced.get(
+            "memory_enabled",
+            True
         )
-
-    memory_enabled = advanced.get(
-        "memory_enabled",
-        True
     )
 
-    history_limit = advanced.get(
-        "history_limit",
-        20
+    history_limit = int(
+        advanced.get(
+            "history_limit",
+            20
+        )
     )
 
-    response_length = advanced.get(
-        "response_length",
-        1200
+    response_length = int(
+        advanced.get(
+            "response_length",
+            1200
+        )
     )
 
-    timeout = advanced.get(
-        "timeout",
-        DEFAULT_AI_TIMEOUT
+    timeout = int(
+        advanced.get(
+            "timeout",
+            DEFAULT_AI_TIMEOUT
+        )
     )
 
     request_key = get_request_key(
@@ -1219,39 +1016,64 @@ async def generate_chat_reply(
 
         async with AI_SEMAPHORE:
 
-            # ==================================================
+            # ------------------------------------------------
+            # GET ACTIVE CHARACTER
+            # ------------------------------------------------
+
+            character = None
+
+            if character_name:
+                character = get_character(
+                    guild.id,
+                    character_name
+                )
+
+            if character is None:
+
+                try:
+                    character = db.get_active_character(
+                        guild.id
+                    )
+                except Exception:
+                    character = None
+
+            # ------------------------------------------------
+            # AI ENGINE
+            # ------------------------------------------------
+            #
             # IMPORTANT:
-            # AIEngine الحالي عندك يستخدم:
+            # AIEngine.generate() عندك يستخدم:
             #
-            # generate(
-            #   guild_id,
-            #   channel_id,
-            #   user_id,
-            #   character_name,
-            #   user_message,
-            #   provider=None,
-            #   model=None,
-            #   mode="normal"
-            # )
-            #
-            # لذلك لا نرسل:
-            # memory_enabled
-            # history_limit
-            # max_tokens_override
-            # character
             # prompt
-            # ==================================================
+            # character
+            #
+            # وليس:
+            #
+            # user_message
+            # character_name
+            #
+            # ------------------------------------------------
 
             result = await asyncio.wait_for(
                 ai.generate(
                     guild_id=guild.id,
                     channel_id=message.channel.id,
                     user_id=message.author.id,
-                    character_name=character_name,
-                    user_message=prompt,
+
+                    prompt=prompt,
+                    character=character,
+
+                    mode=mode,
                     provider=provider,
                     model=model,
-                    mode=mode,
+
+                    history_limit=(
+                        history_limit
+                        if memory_enabled
+                        else 0
+                    ),
+
+                    max_tokens_override=response_length,
                 ),
                 timeout=timeout
             )
@@ -1297,11 +1119,16 @@ async def generate_dm_reply(
                     guild_id=0,
                     channel_id=0,
                     user_id=user_id,
-                    character_name=None,
-                    user_message=prompt,
+
+                    prompt=prompt,
+                    character=None,
+
                     provider=PRIMARY_AI_PROVIDER,
                     model=GOOGLE_MODEL,
                     mode="normal",
+
+                    history_limit=20,
+                    max_tokens_override=1200,
                 ),
                 timeout=DEFAULT_AI_TIMEOUT
             )
@@ -1372,10 +1199,8 @@ async def generate_with_typing_message(
 
     try:
 
-        placeholder = (
-            await message.channel.send(
-                f"**{character_name}** يكتب..."
-            )
+        placeholder = await message.channel.send(
+            f"**{character_name}** يكتب..."
         )
 
         delay = random.uniform(
@@ -1383,9 +1208,7 @@ async def generate_with_typing_message(
             MAX_TYPING_DELAY
         )
 
-        await asyncio.sleep(
-            delay
-        )
+        await asyncio.sleep(delay)
 
         response = await generate_chat_reply(
             message,
@@ -1443,29 +1266,23 @@ async def generate_with_typing_message(
 
             try:
                 await placeholder.edit(
-                    content=(
-                        "❌ حدث خطأ أثناء توليد الرد."
-                    )
+                    content="❌ حدث خطأ أثناء توليد الرد."
                 )
             except Exception:
                 pass
 
 
 # ============================================================
-# CHARACTER DROPDOWN
+# CHARACTER OPTIONS
 # ============================================================
 
-def make_character_options(
-    characters
-):
+def make_character_options(characters):
 
     options = []
 
     for character in characters[:25]:
 
-        data = row_to_dict(
-            character
-        )
+        data = row_to_dict(character)
 
         name = data.get(
             "name",
@@ -1493,9 +1310,7 @@ def make_character_options(
         options.append(
             discord.SelectOption(
                 label=str(name)[:100],
-                description=str(
-                    description
-                )[:100],
+                description=str(description)[:100],
                 value=str(name)[:100],
             )
         )
@@ -1504,7 +1319,7 @@ def make_character_options(
 
 
 # ============================================================
-# CHARACTER INFO VIEW
+# CHARACTER INFO
 # ============================================================
 
 class CharacterInfoSelect(
@@ -1519,15 +1334,13 @@ class CharacterInfoSelect(
 
         self.guild_id = guild_id
 
-        options = make_character_options(
-            characters
-        )
-
         super().__init__(
             placeholder="اختر الشخصية...",
             min_values=1,
             max_values=1,
-            options=options
+            options=make_character_options(
+                characters
+            )
         )
 
     async def callback(
@@ -1551,9 +1364,7 @@ class CharacterInfoSelect(
 
             return
 
-        data = row_to_dict(
-            character
-        )
+        data = row_to_dict(character)
 
         char_type = data.get(
             "character_type",
@@ -1565,19 +1376,13 @@ class CharacterInfoSelect(
 
         owner_id = data.get(
             "created_by",
-            data.get(
-                "owner_id"
-            )
+            data.get("owner_id")
         )
 
         embed = discord.Embed(
-            title=(
-                f"🎭 {data.get('name', name)}"
-            ),
+            title=f"🎭 {data.get('name', name)}",
             description=(
-                data.get(
-                    "description"
-                )
+                data.get("description")
                 or "لا يوجد وصف."
             ),
             color=discord.Color.blurple()
@@ -1620,17 +1425,13 @@ class CharacterInfoSelect(
             inline=True
         )
 
-        personality = data.get(
-            "personality"
-        )
+        personality = data.get("personality")
 
         if personality:
 
             embed.add_field(
                 name="الشخصية",
-                value=str(
-                    personality
-                )[:1024],
+                value=str(personality)[:1024],
                 inline=False
             )
 
@@ -1654,9 +1455,7 @@ class CharacterInfoView(
         characters
     ):
 
-        super().__init__(
-            timeout=120
-        )
+        super().__init__(timeout=120)
 
         if characters:
 
@@ -1669,7 +1468,7 @@ class CharacterInfoView(
 
 
 # ============================================================
-# CHARACTER USE VIEW
+# CHARACTER USE
 # ============================================================
 
 class CharacterUseSelect(
@@ -1685,9 +1484,7 @@ class CharacterUseSelect(
         self.guild_id = guild_id
 
         super().__init__(
-            placeholder=(
-                "اختر الشخصية التي تريد تفعيلها..."
-            ),
+            placeholder="اختر الشخصية التي تريد تفعيلها...",
             min_values=1,
             max_values=1,
             options=make_character_options(
@@ -1711,9 +1508,7 @@ class CharacterUseSelect(
         ):
             return
 
-        if not has_broad_management(
-            member
-        ):
+        if not has_broad_management(member):
 
             await interaction.response.send_message(
                 "❌ تحتاج صلاحيات إدارة السيرفر.",
@@ -1758,9 +1553,7 @@ class CharacterUseView(
         characters
     ):
 
-        super().__init__(
-            timeout=120
-        )
+        super().__init__(timeout=120)
 
         if characters:
 
@@ -1818,33 +1611,26 @@ class CharacterEditModal(
         super().__init__()
 
         self.guild_id = guild_id
-
-        self.character = row_to_dict(
-            character
-        )
+        self.character = row_to_dict(character)
 
         self.personality.default = (
-            self.character.get(
-                "personality"
-            ) or ""
+            self.character.get("personality")
+            or ""
         )
 
         self.description.default = (
-            self.character.get(
-                "description"
-            ) or ""
+            self.character.get("description")
+            or ""
         )
 
         self.speaking_style.default = (
-            self.character.get(
-                "speaking_style"
-            ) or ""
+            self.character.get("speaking_style")
+            or ""
         )
 
         self.custom_instructions.default = (
-            self.character.get(
-                "custom_instructions"
-            ) or ""
+            self.character.get("custom_instructions")
+            or ""
         )
 
     async def on_submit(
@@ -1852,15 +1638,11 @@ class CharacterEditModal(
         interaction: discord.Interaction
     ):
 
-        name = self.character.get(
-            "name"
-        )
+        name = self.character.get("name")
 
         owner_id = self.character.get(
             "created_by",
-            self.character.get(
-                "owner_id"
-            )
+            self.character.get("owner_id")
         )
 
         if owner_id != interaction.user.id:
@@ -1880,9 +1662,7 @@ class CharacterEditModal(
                 personality=self.personality.value,
                 description=self.description.value,
                 speaking_style=self.speaking_style.value,
-                custom_instructions=(
-                    self.custom_instructions.value
-                ),
+                custom_instructions=self.custom_instructions.value,
             )
 
             await interaction.response.send_message(
@@ -1899,9 +1679,7 @@ class CharacterEditModal(
                     personality=self.personality.value,
                     description=self.description.value,
                     speaking_style=self.speaking_style.value,
-                    custom_instructions=(
-                        self.custom_instructions.value
-                    ),
+                    custom_instructions=self.custom_instructions.value,
                 )
 
                 await interaction.response.send_message(
@@ -1968,15 +1746,11 @@ class CharacterEditSelect(
 
             return
 
-        data = row_to_dict(
-            character
-        )
+        data = row_to_dict(character)
 
         owner_id = data.get(
             "created_by",
-            data.get(
-                "owner_id"
-            )
+            data.get("owner_id")
         )
 
         if owner_id != interaction.user.id:
@@ -2006,9 +1780,7 @@ class CharacterEditView(
         characters
     ):
 
-        super().__init__(
-            timeout=120
-        )
+        super().__init__(timeout=120)
 
         if characters:
 
@@ -2035,9 +1807,7 @@ class CharacterDeleteConfirm(
         owner_id
     ):
 
-        super().__init__(
-            timeout=60
-        )
+        super().__init__(timeout=60)
 
         self.guild_id = guild_id
         self.character_name = character_name
@@ -2127,9 +1897,7 @@ class CharacterDeleteSelect(
         self.guild_id = guild_id
 
         super().__init__(
-            placeholder=(
-                "اختر الشخصية التي تريد حذفها..."
-            ),
+            placeholder="اختر الشخصية التي تريد حذفها...",
             min_values=1,
             max_values=1,
             options=make_character_options(
@@ -2156,15 +1924,11 @@ class CharacterDeleteSelect(
 
             return
 
-        data = row_to_dict(
-            character
-        )
+        data = row_to_dict(character)
 
         owner_id = data.get(
             "created_by",
-            data.get(
-                "owner_id"
-            )
+            data.get("owner_id")
         )
 
         if owner_id != interaction.user.id:
@@ -2212,9 +1976,7 @@ class CharacterDeleteView(
         characters
     ):
 
-        super().__init__(
-            timeout=120
-        )
+        super().__init__(timeout=120)
 
         if characters:
 
@@ -2227,20 +1989,15 @@ class CharacterDeleteView(
 
 
 # ============================================================
-# DASHBOARD EMBED
+# DASHBOARD
 # ============================================================
 
 def build_ai_dashboard(
     guild: discord.Guild
 ):
 
-    config = get_config(
-        guild.id
-    )
-
-    advanced = get_advanced(
-        guild.id
-    )
+    config = get_config(guild.id)
+    advanced = get_advanced(guild.id)
 
     character = (
         config.get("character")
@@ -2280,10 +2037,7 @@ def build_ai_dashboard(
         name="AI",
         value=(
             "🟢 مفعل"
-            if config.get(
-                "enabled",
-                True
-            )
+            if config.get("enabled", True)
             else "🔴 متوقف"
         ),
         inline=True
@@ -2396,9 +2150,7 @@ def build_ai_dashboard(
     )
 
     embed.set_footer(
-        text=(
-            "MyAI • أعلى 3 رتب فقط تستطيع تعديل لوحة AI"
-        )
+        text="MyAI • أعلى 3 رتب فقط تستطيع تعديل لوحة AI"
     )
 
     return embed
@@ -2448,18 +2200,13 @@ class TextSettingsModal(
         max_length=5
     )
 
-    def __init__(
-        self,
-        guild_id: int
-    ):
+    def __init__(self, guild_id: int):
 
         super().__init__()
 
         self.guild_id = guild_id
 
-        settings = get_advanced(
-            guild_id
-        )
+        settings = get_advanced(guild_id)
 
         self.history_limit.default = str(
             settings["history_limit"]
@@ -2605,44 +2352,27 @@ class AllowDenyModal(
         style=discord.TextStyle.paragraph
     )
 
-    def __init__(
-        self,
-        guild_id: int
-    ):
+    def __init__(self, guild_id: int):
 
         super().__init__()
 
         self.guild_id = guild_id
 
-        settings = get_advanced(
-            guild_id
+        settings = get_advanced(guild_id)
+
+        self.allow_members.default = ", ".join(
+            str(x)
+            for x in settings["allow_members"]
         )
 
-        self.allow_members.default = (
-            ", ".join(
-                str(x)
-                for x in settings[
-                    "allow_members"
-                ]
-            )
+        self.deny_members.default = ", ".join(
+            str(x)
+            for x in settings["deny_members"]
         )
 
-        self.deny_members.default = (
-            ", ".join(
-                str(x)
-                for x in settings[
-                    "deny_members"
-                ]
-            )
-        )
-
-        self.sensitive_keywords.default = (
-            ", ".join(
-                str(x)
-                for x in settings[
-                    "sensitive_keywords"
-                ]
-            )
+        self.sensitive_keywords.default = ", ".join(
+            str(x)
+            for x in settings["sensitive_keywords"]
         )
 
     async def on_submit(
@@ -2678,10 +2408,7 @@ class AllowDenyModal(
         ):
 
             await interaction.response.send_message(
-                (
-                    "✅ تم تحديث إعدادات السماح "
-                    "والمنع والكلمات الحساسة."
-                ),
+                "✅ تم تحديث إعدادات السماح والمنع والكلمات الحساسة.",
                 ephemeral=True
             )
 
@@ -2701,14 +2428,9 @@ class AISettingsView(
     discord.ui.View
 ):
 
-    def __init__(
-        self,
-        guild_id: int
-    ):
+    def __init__(self, guild_id: int):
 
-        super().__init__(
-            timeout=300
-        )
+        super().__init__(timeout=300)
 
         self.guild_id = guild_id
 
@@ -2728,9 +2450,7 @@ class AISettingsView(
         ):
             return False
 
-        if not can_use_ai_dashboard(
-            member
-        ):
+        if not can_use_ai_dashboard(member):
 
             await interaction.response.send_message(
                 "❌ لوحة AI مخصصة لأعلى 3 رتب فقط.",
@@ -2769,18 +2489,14 @@ class AISettingsView(
             self.guild_id
         )
 
-        enabled = not config[
-            "enabled"
-        ]
+        enabled = not config["enabled"]
 
         update_config(
             self.guild_id,
             enabled=enabled
         )
 
-        await self.refresh(
-            interaction
-        )
+        await self.refresh(interaction)
 
     @discord.ui.button(
         label="Reply",
@@ -2872,18 +2588,16 @@ class AISettingsView(
             self.guild_id
         )
 
-        settings["memory_enabled"] = not (
-            settings["memory_enabled"]
-        )
+        settings["memory_enabled"] = not settings[
+            "memory_enabled"
+        ]
 
         save_advanced(
             self.guild_id,
             settings
         )
 
-        await self.refresh(
-            interaction
-        )
+        await self.refresh(interaction)
 
     @discord.ui.button(
         label="Advanced",
@@ -2919,18 +2633,16 @@ class AISettingsView(
             self.guild_id
         )
 
-        settings["security_enabled"] = not (
-            settings["security_enabled"]
-        )
+        settings["security_enabled"] = not settings[
+            "security_enabled"
+        ]
 
         save_advanced(
             self.guild_id,
             settings
         )
 
-        await self.refresh(
-            interaction
-        )
+        await self.refresh(interaction)
 
     @discord.ui.button(
         label="Bot Chat",
@@ -2948,18 +2660,16 @@ class AISettingsView(
             self.guild_id
         )
 
-        settings["bot_chat_enabled"] = not (
-            settings["bot_chat_enabled"]
-        )
+        settings["bot_chat_enabled"] = not settings[
+            "bot_chat_enabled"
+        ]
 
         save_advanced(
             self.guild_id,
             settings
         )
 
-        await self.refresh(
-            interaction
-        )
+        await self.refresh(interaction)
 
     @discord.ui.button(
         label="Allow / Deny",
@@ -3047,9 +2757,7 @@ class AISettingsView(
             self.guild_id
         )
 
-        await self.refresh(
-            interaction
-        )
+        await self.refresh(interaction)
 
     @discord.ui.button(
         label="Refresh",
@@ -3063,9 +2771,7 @@ class AISettingsView(
         button: discord.ui.Button
     ):
 
-        await self.refresh(
-            interaction
-        )
+        await self.refresh(interaction)
 
 
 # ============================================================
@@ -3143,16 +2849,12 @@ class ReplyTypeView(
         guild_id: int
     ):
 
-        super().__init__(
-            timeout=120
-        )
+        super().__init__(timeout=120)
 
         self.guild_id = guild_id
 
         self.add_item(
-            ReplyTypeSelect(
-                guild_id
-            )
+            ReplyTypeSelect(guild_id)
         )
 
     @discord.ui.button(
@@ -3252,16 +2954,12 @@ class ModeView(
         guild_id: int
     ):
 
-        super().__init__(
-            timeout=120
-        )
+        super().__init__(timeout=120)
 
         self.guild_id = guild_id
 
         self.add_item(
-            ModeSelect(
-                guild_id
-            )
+            ModeSelect(guild_id)
         )
 
     @discord.ui.button(
@@ -3353,9 +3051,7 @@ class CharacterDashboardView(
         characters
     ):
 
-        super().__init__(
-            timeout=120
-        )
+        super().__init__(timeout=120)
 
         self.guild_id = guild_id
 
@@ -3455,16 +3151,12 @@ class ChannelView(
         guild_id: int
     ):
 
-        super().__init__(
-            timeout=120
-        )
+        super().__init__(timeout=120)
 
         self.guild_id = guild_id
 
         self.add_item(
-            ChannelSelect(
-                guild_id
-            )
+            ChannelSelect(guild_id)
         )
 
     @discord.ui.button(
@@ -3507,10 +3199,7 @@ async def ai_command(
     member = interaction.user
 
     if (
-        not isinstance(
-            member,
-            discord.Member
-        )
+        not isinstance(member, discord.Member)
         or not has_broad_management(member)
     ):
 
@@ -3525,9 +3214,7 @@ async def ai_command(
         interaction.guild.id
     )
 
-    enabled = not config[
-        "enabled"
-    ]
+    enabled = not config["enabled"]
 
     update_config(
         interaction.guild.id,
@@ -3543,10 +3230,6 @@ async def ai_command(
     )
 
 
-# ============================================================
-# AI SETUP
-# ============================================================
-
 @bot.tree.command(
     name="ai_setup",
     description="إعداد روم AI"
@@ -3561,10 +3244,7 @@ async def ai_setup(
     member = interaction.user
 
     if (
-        not isinstance(
-            member,
-            discord.Member
-        )
+        not isinstance(member, discord.Member)
         or not has_broad_management(member)
     ):
 
@@ -3584,10 +3264,6 @@ async def ai_setup(
     )
 
 
-# ============================================================
-# AI SETTINGS
-# ============================================================
-
 @bot.tree.command(
     name="ai_settings",
     description="فتح لوحة إعدادات AI"
@@ -3602,18 +3278,12 @@ async def ai_settings(
     member = interaction.user
 
     if (
-        not isinstance(
-            member,
-            discord.Member
-        )
+        not isinstance(member, discord.Member)
         or not can_use_ai_dashboard(member)
     ):
 
         await interaction.response.send_message(
-            (
-                "❌ هذه اللوحة متاحة فقط "
-                "لأعلى 3 رتب في السيرفر."
-            ),
+            "❌ هذه اللوحة متاحة فقط لأعلى 3 رتب في السيرفر.",
             ephemeral=True
         )
 
@@ -3630,10 +3300,6 @@ async def ai_settings(
     )
 
 
-# ============================================================
-# AI CONFIG
-# ============================================================
-
 @bot.tree.command(
     name="ai_config",
     description="عرض إعدادات AI"
@@ -3648,10 +3314,7 @@ async def ai_config(
     member = interaction.user
 
     if (
-        not isinstance(
-            member,
-            discord.Member
-        )
+        not isinstance(member, discord.Member)
         or not can_use_ai_dashboard(member)
     ):
 
@@ -3669,10 +3332,6 @@ async def ai_config(
         ephemeral=True
     )
 
-
-# ============================================================
-# CHARACTER CREATE
-# ============================================================
 
 @bot.tree.command(
     name="character_create",
@@ -3745,17 +3404,10 @@ async def character_create(
         traceback.print_exc()
 
         await interaction.response.send_message(
-            (
-                "❌ تعذر إنشاء الشخصية. "
-                "ربما الاسم مستخدم مسبقًا."
-            ),
+            "❌ تعذر إنشاء الشخصية. ربما الاسم مستخدم مسبقًا.",
             ephemeral=True
         )
 
-
-# ============================================================
-# CHARACTER INFO
-# ============================================================
 
 @bot.tree.command(
     name="character_info",
@@ -3791,10 +3443,6 @@ async def character_info(
     )
 
 
-# ============================================================
-# CHARACTER USE
-# ============================================================
-
 @bot.tree.command(
     name="character_use",
     description="تفعيل شخصية للسيرفر"
@@ -3809,10 +3457,7 @@ async def character_use(
     member = interaction.user
 
     if (
-        not isinstance(
-            member,
-            discord.Member
-        )
+        not isinstance(member, discord.Member)
         or not has_broad_management(member)
     ):
 
@@ -3845,10 +3490,6 @@ async def character_use(
         ephemeral=True
     )
 
-
-# ============================================================
-# CHARACTER EDIT
-# ============================================================
 
 @bot.tree.command(
     name="character_edit",
@@ -3885,10 +3526,6 @@ async def character_edit(
     )
 
 
-# ============================================================
-# CHARACTER DELETE
-# ============================================================
-
 @bot.tree.command(
     name="character_delete",
     description="حذف شخصيتك"
@@ -3924,10 +3561,6 @@ async def character_delete(
     )
 
 
-# ============================================================
-# CHARACTER LIST
-# ============================================================
-
 @bot.tree.command(
     name="character_list",
     description="عرض شخصيات السيرفر"
@@ -3959,9 +3592,7 @@ async def character_list(
 
     for character in characters:
 
-        data = row_to_dict(
-            character
-        )
+        data = row_to_dict(character)
 
         name = data.get(
             "name",
@@ -3981,9 +3612,7 @@ async def character_list(
             f"{CHARACTER_TYPES.get(char_type, char_type)}"
         )
 
-    text = "\n".join(
-        lines
-    )
+    text = "\n".join(lines)
 
     if len(text) > 1900:
         text = text[:1890] + "\n..."
@@ -3993,10 +3622,6 @@ async def character_list(
         ephemeral=True
     )
 
-
-# ============================================================
-# AI STATUS
-# ============================================================
 
 @bot.tree.command(
     name="ai_status",
@@ -4074,10 +3699,6 @@ async def ai_status(
     )
 
 
-# ============================================================
-# MEMORY CLEAR
-# ============================================================
-
 @bot.tree.command(
     name="ai_memory_clear",
     description="مسح ذاكرة AI"
@@ -4092,10 +3713,7 @@ async def ai_memory_clear(
     member = interaction.user
 
     if (
-        not isinstance(
-            member,
-            discord.Member
-        )
+        not isinstance(member, discord.Member)
         or not has_broad_management(member)
     ):
 
@@ -4127,10 +3745,6 @@ async def ai_memory_clear(
         )
 
 
-# ============================================================
-# AI DM
-# ============================================================
-
 @bot.tree.command(
     name="ai_dm",
     description="تشغيل أو إيقاف AI في الخاص"
@@ -4145,9 +3759,7 @@ async def ai_dm(
             interaction.user.id
         )
 
-        new_value = not bool(
-            current
-        )
+        new_value = not bool(current)
 
         db.set_dm_enabled(
             interaction.user.id,
@@ -4196,9 +3808,7 @@ async def on_message(
 
             save_database_message(
                 message,
-                config.get(
-                    "character"
-                )
+                config.get("character")
             )
 
     except Exception:
@@ -4211,8 +3821,7 @@ async def on_message(
 
     if (
         bot.user
-        and message.author.id
-        == bot.user.id
+        and message.author.id == bot.user.id
     ):
         return
 
@@ -4224,33 +3833,25 @@ async def on_message(
 
         if message.author.bot:
 
-            await bot.process_commands(
-                message
-            )
+            await bot.process_commands(message)
 
             return
 
         try:
 
-            dm_enabled = (
-                db.get_dm_enabled(
-                    message.author.id
-                )
+            dm_enabled = db.get_dm_enabled(
+                message.author.id
             )
 
             if not dm_enabled:
 
-                await bot.process_commands(
-                    message
-                )
+                await bot.process_commands(message)
 
                 return
 
         except Exception:
 
-            await bot.process_commands(
-                message
-            )
+            await bot.process_commands(message)
 
             return
 
@@ -4287,9 +3888,7 @@ async def on_message(
                 "❌ حدث خطأ أثناء معالجة الرسالة."
             )
 
-        await bot.process_commands(
-            message
-        )
+        await bot.process_commands(message)
 
         return
 
@@ -4307,9 +3906,7 @@ async def on_message(
 
     if not config["enabled"]:
 
-        await bot.process_commands(
-            message
-        )
+        await bot.process_commands(message)
 
         return
 
@@ -4318,9 +3915,7 @@ async def on_message(
         config["channel_id"]
     ):
 
-        await bot.process_commands(
-            message
-        )
+        await bot.process_commands(message)
 
         return
 
@@ -4335,9 +3930,7 @@ async def on_message(
             advanced
         ):
 
-            await bot.process_commands(
-                message
-            )
+            await bot.process_commands(message)
 
             return
 
@@ -4353,17 +3946,13 @@ async def on_message(
             advanced
         ):
 
-            await bot.process_commands(
-                message
-            )
+            await bot.process_commands(message)
 
             return
 
         if config["reply_type"] != "bot_chat":
 
-            await bot.process_commands(
-                message
-            )
+            await bot.process_commands(message)
 
             return
 
@@ -4386,9 +3975,7 @@ async def on_message(
                 "🛡️ لا أستطيع معالجة هذه الرسالة."
             )
 
-            await bot.process_commands(
-                message
-            )
+            await bot.process_commands(message)
 
             return
 
@@ -4408,13 +3995,9 @@ async def on_message(
             "direct"
         ):
 
-            if not is_directed_to_bot(
-                message
-            ):
+            if not is_directed_to_bot(message):
 
-                await bot.process_commands(
-                    message
-                )
+                await bot.process_commands(message)
 
                 return
 
@@ -4427,9 +4010,7 @@ async def on_message(
 
         elif reply_type == "bot_chat":
 
-            await bot.process_commands(
-                message
-            )
+            await bot.process_commands(message)
 
             return
 
@@ -4447,9 +4028,7 @@ async def on_message(
 
         if bot_lock.locked():
 
-            await bot.process_commands(
-                message
-            )
+            await bot.process_commands(message)
 
             return
 
@@ -4459,9 +4038,7 @@ async def on_message(
 
     if request_key in ACTIVE_REQUESTS:
 
-        await bot.process_commands(
-            message
-        )
+        await bot.process_commands(message)
 
         return
 
@@ -4488,9 +4065,7 @@ async def on_message(
                     message.guild.id
                 )
 
-                await bot.process_commands(
-                    message
-                )
+                await bot.process_commands(message)
 
                 return
 
@@ -4525,9 +4100,7 @@ async def on_message(
     # COMMANDS
     # --------------------------------------------------------
 
-    await bot.process_commands(
-        message
-    )
+    await bot.process_commands(message)
 
 
 # ============================================================
@@ -4541,21 +4114,10 @@ async def on_ready():
     print("MyAI BOT — ONLINE")
     print("=" * 60)
 
-    print(
-        f"Bot: {bot.user}"
-    )
-
-    print(
-        f"Provider: {PRIMARY_AI_PROVIDER}"
-    )
-
-    print(
-        f"Model: {GOOGLE_MODEL}"
-    )
-
-    print(
-        f"Servers: {len(bot.guilds)}"
-    )
+    print(f"Bot: {bot.user}")
+    print(f"Provider: {PRIMARY_AI_PROVIDER}")
+    print(f"Model: {GOOGLE_MODEL}")
+    print(f"Servers: {len(bot.guilds)}")
 
     print("=" * 60)
 
