@@ -295,7 +295,10 @@ def update_config(
     normalized = {}
 
     for key, value in kwargs.items():
-        target = aliases.get(key, key)
+        target = aliases.get(
+            key,
+            key
+        )
         normalized[target] = value
 
     try:
@@ -561,6 +564,7 @@ def get_active_character_for_user(
 
         if character:
             return character
+
     except Exception:
         traceback.print_exc()
 
@@ -575,6 +579,7 @@ def get_active_character_for_user(
 
         if character:
             return character
+
     except Exception:
         traceback.print_exc()
 
@@ -608,6 +613,7 @@ def clean_mentions(
         return ""
 
     if bot.user:
+
         content = content.replace(
             f"<@{bot.user.id}>",
             ""
@@ -629,7 +635,7 @@ async def get_referenced_message(
     message: discord.Message
 ):
     """
-    يحاول الحصول على الرسالة التي قام المستخدم
+    الحصول على الرسالة التي قام المستخدم
     بالرد عليها.
     """
 
@@ -660,10 +666,13 @@ async def get_referenced_message(
         return None
 
     try:
+
         return await message.channel.fetch_message(
             message_id
         )
+
     except Exception:
+
         return None
 
 
@@ -672,9 +681,9 @@ async def build_message_context(
     prompt: str
 ):
     """
-    يبني سياقًا إضافيًا يساعد AI على فهم:
+    بناء سياق إضافي للذكاء الاصطناعي:
     - المرسل الحالي
-    - المستخدمين المذكورين
+    - المستخدمون المذكورون
     - الرسالة التي تم الرد عليها
     - صاحب الرسالة المشار إليها
     """
@@ -709,6 +718,7 @@ async def build_message_context(
     mentioned_users = []
 
     for member in message.mentions:
+
         if (
             bot.user
             and member.id == bot.user.id
@@ -733,6 +743,7 @@ async def build_message_context(
         )
 
     if mentioned_users:
+
         context_parts.append(
             "المستخدمون المذكورون في الرسالة: "
             + ", ".join(
@@ -771,6 +782,7 @@ async def build_message_context(
         ).strip()
 
         if len(referenced_content) > 3000:
+
             referenced_content = (
                 referenced_content[:3000]
                 + "..."
@@ -824,6 +836,7 @@ def split_message(
     text: str,
     limit: int = 1900
 ):
+
     if not text:
         return []
 
@@ -841,6 +854,7 @@ def split_message(
         )
 
         if split_at <= 0:
+
             split_at = text.rfind(
                 " ",
                 0,
@@ -848,6 +862,7 @@ def split_message(
             )
 
         if split_at <= 0:
+
             split_at = limit
 
         chunks.append(
@@ -867,6 +882,7 @@ def split_message(
 def normalize_channel_id(
     value
 ):
+
     if value is None:
         return None
 
@@ -880,6 +896,7 @@ def channel_matches(
     message: discord.Message,
     channel_id
 ):
+
     channel_id = normalize_channel_id(
         channel_id
     )
@@ -896,6 +913,7 @@ def channel_matches(
 def is_directed_to_bot(
     message: discord.Message
 ):
+
     if not bot.user:
         return False
 
@@ -923,6 +941,7 @@ def is_directed_to_bot(
 def has_broad_management(
     member: discord.Member
 ):
+
     if member.guild.owner_id == member.id:
         return True
 
@@ -939,6 +958,7 @@ def has_broad_management(
 def get_top_three_roles(
     guild: discord.Guild
 ):
+
     roles = [
         role
         for role in guild.roles
@@ -957,6 +977,7 @@ def get_top_three_roles(
 def can_use_ai_dashboard(
     member: discord.Member
 ):
+
     top_roles = get_top_three_roles(
         member.guild
     )
@@ -970,6 +991,7 @@ def can_use_ai_dashboard(
 def security_check(
     member: discord.Member
 ):
+
     return (
         can_use_ai_dashboard(member)
         or has_broad_management(member)
@@ -984,17 +1006,22 @@ def member_allowed(
     user_id: int,
     advanced: dict
 ):
+
     deny_members = set()
 
     for value in advanced.get(
         "deny_members",
         []
     ):
+
         try:
+
             deny_members.add(
                 int(value)
             )
+
         except Exception:
+
             pass
 
     if user_id in deny_members:
@@ -1008,11 +1035,14 @@ def member_allowed(
     if allow_members:
 
         try:
+
             allow_ids = {
                 int(value)
                 for value in allow_members
             }
+
         except Exception:
+
             allow_ids = set()
 
         return user_id in allow_ids
@@ -1028,10 +1058,12 @@ def contains_sensitive_content(
     content: str,
     advanced: dict
 ):
+
     if not advanced.get(
         "security_enabled",
         True
     ):
+
         return False
 
     text = normalize_text(
@@ -1062,6 +1094,7 @@ def contains_sensitive_content(
 def get_request_key(
     message: discord.Message
 ):
+
     return (
         (
             message.guild.id
@@ -1080,7 +1113,9 @@ def get_request_key(
 def get_bot_lock(
     guild_id: int
 ):
+
     if guild_id not in BOT_CHAT_LOCKS:
+
         BOT_CHAT_LOCKS[guild_id] = (
             asyncio.Lock()
         )
@@ -1091,6 +1126,7 @@ def get_bot_lock(
 def get_bot_chain(
     guild_id: int
 ):
+
     return BOT_CHAT_CHAINS.get(
         guild_id,
         0
@@ -1100,12 +1136,14 @@ def get_bot_chain(
 def reset_bot_chain(
     guild_id: int
 ):
+
     BOT_CHAT_CHAINS[guild_id] = 0
 
 
 def increment_bot_chain(
     guild_id: int
 ):
+
     value = BOT_CHAT_CHAINS.get(
         guild_id,
         0
@@ -1122,8 +1160,11 @@ def bot_cooldown_active(
     guild_id: int,
     cooldown: float
 ):
-    last_response = BOT_CHAT_LAST_RESPONSE.get(
-        guild_id
+
+    last_response = (
+        BOT_CHAT_LAST_RESPONSE.get(
+            guild_id
+        )
     )
 
     if last_response is None:
@@ -1140,10 +1181,12 @@ def should_process_bot_chat(
     config: dict,
     advanced: dict
 ):
+
     if not advanced.get(
         "bot_chat_enabled",
         True
     ):
+
         return False
 
     if not message.author.bot:
@@ -1154,6 +1197,7 @@ def should_process_bot_chat(
         and message.author.id
         == bot.user.id
     ):
+
         return False
 
     if not message.guild:
@@ -1183,6 +1227,7 @@ def should_process_bot_chat(
         guild_id,
         cooldown
     ):
+
         return False
 
     return True
@@ -1196,6 +1241,7 @@ def save_database_message(
     message: discord.Message,
     character_name: Optional[str] = None
 ):
+
     if not message.guild:
         return False
 
@@ -1266,6 +1312,7 @@ async def generate_chat_reply(
     message: discord.Message,
     prompt: str
 ):
+
     guild = message.guild
 
     if guild is None:
@@ -1417,6 +1464,7 @@ async def generate_dm_reply(
     user_id: int,
     prompt: str
 ):
+
     try:
 
         async with AI_SEMAPHORE:
@@ -1455,6 +1503,48 @@ async def generate_dm_reply(
 
 
 # ============================================================
+# FORMAT AI RESPONSE
+# ============================================================
+
+def format_ai_response(
+    message: discord.Message,
+    response: str
+):
+
+    character = None
+
+    if message.guild:
+
+        character = (
+            get_active_character_for_user(
+                message.guild.id,
+                message.author.id
+            )
+        )
+
+    character_data = (
+        row_to_dict(character)
+        or {}
+    )
+
+    character_name = (
+        character_data.get("name")
+        or "MyAI"
+    )
+
+    response = (
+        str(response or "")
+        .strip()
+    )
+
+    return (
+        f"# {character_name}\n\n"
+        "-------------------------------\n"
+        f"{response}"
+    )
+
+
+# ============================================================
 # SEND AI RESPONSE
 # ============================================================
 
@@ -1462,25 +1552,24 @@ async def send_ai_response(
     message: discord.Message,
     response: str
 ):
-    """
-    كل رد يبدأ بـ Reply على الرسالة التي سببت التفاعل.
-    """
 
     if not response:
         return
 
+    formatted = format_ai_response(
+        message,
+        response
+    )
+
     chunks = split_message(
-        response,
+        formatted,
         1900
     )
 
     if not chunks:
         return
 
-    # --------------------------------------------------------
-    # أول جزء: Reply مباشر
-    # --------------------------------------------------------
-
+    # أول جزء = Reply للرسالة التي كلمت البوت
     await message.reply(
         chunks[0],
         mention_author=False,
@@ -1489,10 +1578,7 @@ async def send_ai_response(
         )
     )
 
-    # --------------------------------------------------------
-    # الأجزاء الإضافية
-    # --------------------------------------------------------
-
+    # بقية أجزاء الرد تبقى مرتبطة بالرسالة الأصلية
     for chunk in chunks[1:]:
 
         await message.channel.send(
@@ -1535,11 +1621,9 @@ async def generate_with_typing_message(
 
     try:
 
-        # ----------------------------------------------------
-        # رسالة "يكتب..." تكون Reply
-        # ----------------------------------------------------
-
         placeholder = await message.reply(
+            f"# {character_name}\n\n"
+            "-------------------------------\n"
             f"**{character_name}** يكتب...",
             mention_author=False,
             allowed_mentions=(
@@ -1569,8 +1653,13 @@ async def generate_with_typing_message(
 
             return
 
+        formatted = format_ai_response(
+            message,
+            response
+        )
+
         chunks = split_message(
-            response,
+            formatted,
             1900
         )
 
@@ -1582,17 +1671,10 @@ async def generate_with_typing_message(
 
             return
 
-        # ----------------------------------------------------
-        # تحويل placeholder إلى الرد الحقيقي
-        # ----------------------------------------------------
-
+        # تحويل "يكتب..." إلى الرد النهائي
         await placeholder.edit(
             content=chunks[0]
         )
-
-        # ----------------------------------------------------
-        # الأجزاء الإضافية
-        # ----------------------------------------------------
 
         for chunk in chunks[1:]:
 
@@ -1610,8 +1692,11 @@ async def generate_with_typing_message(
         if placeholder:
 
             try:
+
                 await placeholder.delete()
+
             except Exception:
+
                 pass
 
         raise
@@ -1631,6 +1716,7 @@ async def generate_with_typing_message(
                 )
 
             except Exception:
+
                 pass
 
 
@@ -1641,13 +1727,15 @@ async def generate_with_typing_message(
 def make_character_options(
     characters
 ):
+
     options = []
 
     for character in characters[:25]:
 
-        data = row_to_dict(
-            character
-        ) or {}
+        data = (
+            row_to_dict(character)
+            or {}
+        )
 
         name = data.get(
             "name",
@@ -1729,9 +1817,10 @@ class CharacterInfoSelect(
 
             return
 
-        data = row_to_dict(
-            character
-        ) or {}
+        data = (
+            row_to_dict(character)
+            or {}
+        )
 
         char_type = data.get(
             "character_type",
@@ -1747,9 +1836,7 @@ class CharacterInfoSelect(
         )
 
         embed = discord.Embed(
-            title=(
-                f"🎭 {data.get('name', name)}"
-            ),
+            title=f"🎭 {data.get('name', name)}",
             description=(
                 data.get("description")
                 or "لا يوجد وصف."
@@ -1891,9 +1978,10 @@ class CharacterUseSelect(
 
             return
 
-        data = row_to_dict(
-            character
-        ) or {}
+        data = (
+            row_to_dict(character)
+            or {}
+        )
 
         owner_id = data.get(
             "created_by",
@@ -1914,10 +2002,12 @@ class CharacterUseSelect(
 
         try:
 
-            success = db.set_user_active_character(
-                self.guild_id,
-                interaction.user.id,
-                name
+            success = (
+                db.set_user_active_character(
+                    self.guild_id,
+                    interaction.user.id,
+                    name
+                )
             )
 
             if not success:
@@ -2149,9 +2239,10 @@ class CharacterEditSelect(
 
             return
 
-        data = row_to_dict(
-            character
-        ) or {}
+        data = (
+            row_to_dict(character)
+            or {}
+        )
 
         owner_id = data.get(
             "created_by",
@@ -2334,9 +2425,10 @@ class CharacterDeleteSelect(
 
             return
 
-        data = row_to_dict(
-            character
-        ) or {}
+        data = (
+            row_to_dict(character)
+            or {}
+        )
 
         owner_id = data.get(
             "created_by",
@@ -2598,7 +2690,8 @@ class TextSettingsModal(
         max_length=4
     )
 
-    # لا تستخدم اسم timeout هنا
+    # مهم:
+    # لا نستخدم اسم timeout لأنه محجوز داخليًا في Modal
     ai_timeout = discord.ui.TextInput(
         label="مهلة AI بالثواني",
         placeholder="10 - 180",
@@ -2790,25 +2883,31 @@ class AllowDenyModal(
             guild_id
         )
 
-        self.allow_members.default = ", ".join(
-            str(x)
-            for x in settings[
-                "allow_members"
-            ]
+        self.allow_members.default = (
+            ", ".join(
+                str(x)
+                for x in settings[
+                    "allow_members"
+                ]
+            )
         )
 
-        self.deny_members.default = ", ".join(
-            str(x)
-            for x in settings[
-                "deny_members"
-            ]
+        self.deny_members.default = (
+            ", ".join(
+                str(x)
+                for x in settings[
+                    "deny_members"
+                ]
+            )
         )
 
-        self.sensitive_keywords.default = ", ".join(
-            str(x)
-            for x in settings[
-                "sensitive_keywords"
-            ]
+        self.sensitive_keywords.default = (
+            ", ".join(
+                str(x)
+                for x in settings[
+                    "sensitive_keywords"
+                ]
+            )
         )
 
     async def on_submit(
@@ -2889,6 +2988,7 @@ class AISettingsView(
             member,
             discord.Member
         ):
+
             return False
 
         if not can_use_ai_dashboard(
@@ -3886,6 +3986,7 @@ async def character_create(
 
         return
 
+    # النوع الداخلي دائمًا normal
     selected_character_type = "normal"
 
     try:
@@ -4002,7 +4103,7 @@ async def character_use(
     )
 
     # --------------------------------------------------------
-    # شخصية السيرفر الافتراضية
+    # إضافة الشخصية الافتراضية للسيرفر
     # --------------------------------------------------------
 
     try:
@@ -4036,9 +4137,7 @@ async def character_use(
                     character
                 )
                 or {}
-            ).get(
-                "name"
-            )
+            ).get("name")
             for character in characters
         }
 
