@@ -13,6 +13,7 @@ class Database:
     - main.py
     - ai_engine.py
     - existing myai.db databases
+    - old character schemas
     - character system
     - AI configuration
     - chat history / memory
@@ -39,6 +40,11 @@ class Database:
         "طبيعي، واضح، ودود، ومختصر عند الحاجة."
     )
 
+    DEFAULT_SYSTEM_PROMPT = (
+        "أنت مساعد ذكاء اصطناعي ودود وذكي. "
+        "ساعد المستخدم بوضوح واحترام."
+    )
+
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = (
             db_path
@@ -55,18 +61,22 @@ class Database:
             timeout=10,
         )
 
-        # مهم جدًا:
         # main.py يستخدم config.get(...)
-        # لذلك لا نستخدم sqlite3.Row هنا.
         self.conn.row_factory = self._dict_factory
 
         self._configure_sqlite()
+
         self._create_tables()
+
+        # مهم:
+        # هذه الدوال تصلح قواعد البيانات القديمة بدون حذف البيانات.
         self._repair_characters_table()
         self._repair_messages_table()
         self._repair_settings_tables()
+
         self._create_dm_tables()
         self._migrate_old_models()
+
         self._ensure_dm_character()
 
     # ============================================================
@@ -75,13 +85,8 @@ class Database:
 
     @staticmethod
     def _dict_factory(cursor, row):
-        """
-        Return normal dictionaries instead of sqlite3.Row.
-
-        This fixes:
-            AttributeError: 'sqlite3.Row' object has no attribute 'get'
-        """
         columns = [column[0] for column in cursor.description]
+
         return {
             columns[index]: value
             for index, value in enumerate(row)
@@ -122,7 +127,9 @@ class Database:
         name = str(name).strip()
 
         if not name:
-            raise ValueError("اسم الشخصية لا يمكن أن يكون فارغًا.")
+            raise ValueError(
+                "اسم الشخصية لا يمكن أن يكون فارغًا."
+            )
 
         if len(name) > 100:
             raise ValueError(
@@ -151,7 +158,8 @@ class Database:
 
         if len(value) > max_length:
             raise ValueError(
-                f"{field_name} طويل جدًا. الحد الأقصى {max_length} حرف."
+                f"{field_name} طويل جدًا. "
+                f"الحد الأقصى {max_length} حرف."
             )
 
         return value
@@ -164,7 +172,25 @@ class Database:
             self.conn.execute("PRAGMA busy_timeout=5000;")
             self.conn.commit()
 
+    def _table_exists(self, table_name: str) -> bool:
+        with self._lock:
+            row = self.conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = ?
+                LIMIT 1
+                """,
+                (table_name,),
+            ).fetchone()
+
+        return row is not None
+
     def _table_columns(self, table_name: str) -> set:
+        if not self._table_exists(table_name):
+            return set()
+
         with self._lock:
             rows = self.conn.execute(
                 f"PRAGMA table_info({table_name})"
@@ -191,6 +217,7 @@ class Database:
                 f"ALTER TABLE {table_name} "
                 f"ADD COLUMN {column_name} {definition}"
             )
+
             self.conn.commit()
 
     # ============================================================
@@ -208,6 +235,7 @@ class Database:
                     name TEXT NOT NULL,
                     description TEXT NOT NULL DEFAULT '',
                     personality TEXT NOT NULL DEFAULT '',
+                    system_prompt TEXT NOT NULL DEFAULT '',
                     character_type TEXT NOT NULL DEFAULT 'normal',
                     custom_instructions TEXT NOT NULL DEFAULT '',
                     speaking_style TEXT NOT NULL DEFAULT '',
@@ -271,6 +299,16 @@ class Database:
                 """
             )
 
+            self.conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ai_dm_settings (
+                    user_id INTEGER PRIMARY KEY,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    updated_at TEXT
+                )
+                """
+            )
+
             self.conn.commit()
 
             self.conn.execute(
@@ -306,23 +344,52 @@ class Database:
             self.conn.commit()
 
     # ============================================================
-    # DATABASE REPAIR / MIGRATION
+    # CHARACTER DATABASE REPAIR
     # ============================================================
 
     def _repair_characters_table(self):
         """
-        Repairs old character databases without deleting data.
+        Repairs old character databases.
+
+        Especially handles old schemas containing:
+
+            system_prompt TEXT NOT NULL
+
+        without deleting any existing data.
         """
 
         required_columns = {
             "description": "TEXT NOT NULL DEFAULT ''",
+
             "personality": "TEXT NOT NULL DEFAULT ''",
-            "character_type": "TEXT NOT NULL DEFAULT 'normal'",
-            "custom_instructions": "TEXT NOT NULL DEFAULT ''",
-            "speaking_style": "TEXT NOT NULL DEFAULT ''",
-            "provider": "TEXT NOT NULL DEFAULT 'google'",
-            "model": "TEXT NOT NULL DEFAULT 'gemini-3.5-flash-lite'",
-            "created_by": "INTEGER NOT NULL DEFAULT 0",
+
+            "system_prompt": "TEXT NOT NULL DEFAULT ''",
+
+            "character_type": (
+                "TEXT NOT NULL DEFAULT 'normal'"
+            ),
+
+            "custom_instructions": (
+                "TEXT NOT NULL DEFAULT ''"
+            ),
+
+            "speaking_style": (
+                "TEXT NOT NULL DEFAULT ''"
+            ),
+
+            "provider": (
+                "TEXT NOT NULL DEFAULT 'google'"
+            ),
+
+            "model": (
+                "TEXT NOT NULL DEFAULT "
+                "'gemini-3.5-flash-lite'"
+            ),
+
+            "created_by": (
+                "INTEGER NOT NULL DEFAULT 0"
+            ),
+
             "created_at": "TEXT",
         }
 
@@ -334,86 +401,178 @@ class Database:
                     definition,
                 )
             except sqlite3.OperationalError:
+                # لا نوقف البوت بسبب Migration قديمة.
                 pass
 
+        columns = self._table_columns("characters")
+
         with self._lock:
-            self.conn.execute(
-                """
-                UPDATE characters
-                SET description = ''
-                WHERE description IS NULL
-                """
-            )
 
-            self.conn.execute(
-                """
-                UPDATE characters
-                SET personality = ''
-                WHERE personality IS NULL
-                """
-            )
+            # ----------------------------------------------------
+            # description
+            # ----------------------------------------------------
 
-            self.conn.execute(
-                """
-                UPDATE characters
-                SET character_type = 'normal'
-                WHERE character_type IS NULL
-                   OR character_type = ''
-                """
-            )
+            if "description" in columns:
+                self.conn.execute(
+                    """
+                    UPDATE characters
+                    SET description = ''
+                    WHERE description IS NULL
+                    """
+                )
 
-            self.conn.execute(
-                """
-                UPDATE characters
-                SET custom_instructions = ''
-                WHERE custom_instructions IS NULL
-                """
-            )
+            # ----------------------------------------------------
+            # personality
+            # ----------------------------------------------------
 
-            self.conn.execute(
-                """
-                UPDATE characters
-                SET speaking_style = ''
-                WHERE speaking_style IS NULL
-                """
-            )
+            if "personality" in columns:
+                self.conn.execute(
+                    """
+                    UPDATE characters
+                    SET personality = ''
+                    WHERE personality IS NULL
+                    """
+                )
 
-            self.conn.execute(
-                """
-                UPDATE characters
-                SET provider = 'google'
-                WHERE provider IS NULL
-                   OR provider = ''
-                """
-            )
+            # ----------------------------------------------------
+            # system_prompt
+            # ----------------------------------------------------
+            #
+            # هذه هي المشكلة التي ظهرت في الـruntime.
+            #
+            # إذا كان system_prompt فارغًا، نحاول بناؤه
+            # من personality.
+            # ----------------------------------------------------
 
-            self.conn.execute(
-                """
-                UPDATE characters
-                SET model = ?
-                WHERE model IS NULL
-                   OR model = ''
-                """,
-                (self.CURRENT_GOOGLE_MODEL,),
-            )
+            if "system_prompt" in columns:
 
-            self.conn.execute(
-                """
-                UPDATE characters
-                SET created_at = ?
-                WHERE created_at IS NULL
-                   OR created_at = ''
-                """,
-                (self._now(),),
-            )
+                self.conn.execute(
+                    """
+                    UPDATE characters
+                    SET system_prompt = personality
+                    WHERE (
+                        system_prompt IS NULL
+                        OR TRIM(system_prompt) = ''
+                    )
+                    AND personality IS NOT NULL
+                    AND TRIM(personality) != ''
+                    """
+                )
+
+                self.conn.execute(
+                    """
+                    UPDATE characters
+                    SET system_prompt = ?
+                    WHERE system_prompt IS NULL
+                       OR TRIM(system_prompt) = ''
+                    """,
+                    (self.DEFAULT_SYSTEM_PROMPT,),
+                )
+
+            # ----------------------------------------------------
+            # character_type
+            # ----------------------------------------------------
+
+            if "character_type" in columns:
+                self.conn.execute(
+                    """
+                    UPDATE characters
+                    SET character_type = 'normal'
+                    WHERE character_type IS NULL
+                       OR character_type = ''
+                    """
+                )
+
+            # ----------------------------------------------------
+            # custom_instructions
+            # ----------------------------------------------------
+
+            if "custom_instructions" in columns:
+                self.conn.execute(
+                    """
+                    UPDATE characters
+                    SET custom_instructions = ''
+                    WHERE custom_instructions IS NULL
+                    """
+                )
+
+            # ----------------------------------------------------
+            # speaking_style
+            # ----------------------------------------------------
+
+            if "speaking_style" in columns:
+                self.conn.execute(
+                    """
+                    UPDATE characters
+                    SET speaking_style = ''
+                    WHERE speaking_style IS NULL
+                    """
+                )
+
+            # ----------------------------------------------------
+            # provider
+            # ----------------------------------------------------
+
+            if "provider" in columns:
+                self.conn.execute(
+                    """
+                    UPDATE characters
+                    SET provider = 'google'
+                    WHERE provider IS NULL
+                       OR provider = ''
+                    """
+                )
+
+            # ----------------------------------------------------
+            # model
+            # ----------------------------------------------------
+
+            if "model" in columns:
+                self.conn.execute(
+                    """
+                    UPDATE characters
+                    SET model = ?
+                    WHERE model IS NULL
+                       OR model = ''
+                    """,
+                    (self.CURRENT_GOOGLE_MODEL,),
+                )
+
+            # ----------------------------------------------------
+            # created_by
+            # ----------------------------------------------------
+
+            if "created_by" in columns:
+                self.conn.execute(
+                    """
+                    UPDATE characters
+                    SET created_by = 0
+                    WHERE created_by IS NULL
+                    """
+                )
+
+            # ----------------------------------------------------
+            # created_at
+            # ----------------------------------------------------
+
+            if "created_at" in columns:
+                self.conn.execute(
+                    """
+                    UPDATE characters
+                    SET created_at = ?
+                    WHERE created_at IS NULL
+                       OR created_at = ''
+                    """,
+                    (self._now(),),
+                )
 
             self.conn.commit()
 
-    def _repair_messages_table(self):
-        """
-        Repairs old messages table.
-        """
+    # ============================================================
+    # MESSAGES DATABASE REPAIR
+    # ============================================================
 
+    def _repair_messages_table(self):
         required_columns = {
             "guild_id": "INTEGER",
             "channel_id": "INTEGER",
@@ -434,50 +593,69 @@ class Database:
             except sqlite3.OperationalError:
                 pass
 
+        columns = self._table_columns("messages")
+
         with self._lock:
-            self.conn.execute(
-                """
-                UPDATE messages
-                SET role = 'user'
-                WHERE role IS NULL
-                   OR role = ''
-                """
-            )
 
-            self.conn.execute(
-                """
-                UPDATE messages
-                SET content = ''
-                WHERE content IS NULL
-                """
-            )
+            if "role" in columns:
+                self.conn.execute(
+                    """
+                    UPDATE messages
+                    SET role = 'user'
+                    WHERE role IS NULL
+                       OR role = ''
+                    """
+                )
 
-            self.conn.execute(
-                """
-                UPDATE messages
-                SET created_at = ?
-                WHERE created_at IS NULL
-                   OR created_at = ''
-                """,
-                (self._now(),),
-            )
+            if "content" in columns:
+                self.conn.execute(
+                    """
+                    UPDATE messages
+                    SET content = ''
+                    WHERE content IS NULL
+                    """
+                )
+
+            if "created_at" in columns:
+                self.conn.execute(
+                    """
+                    UPDATE messages
+                    SET created_at = ?
+                    WHERE created_at IS NULL
+                       OR created_at = ''
+                    """,
+                    (self._now(),),
+                )
 
             self.conn.commit()
 
+    # ============================================================
+    # SETTINGS DATABASE REPAIR
+    # ============================================================
+
     def _repair_settings_tables(self):
-        """
-        Repairs guild_settings and ai_config.
-        """
 
         guild_columns = {
             "active_character": "TEXT",
-            "active_provider": "TEXT DEFAULT 'google'",
-            "active_model": "TEXT DEFAULT 'gemini-3.5-flash-lite'",
-            "ai_enabled": "INTEGER DEFAULT 0",
+            "active_provider": (
+                "TEXT DEFAULT 'google'"
+            ),
+            "active_model": (
+                "TEXT DEFAULT 'gemini-3.5-flash-lite'"
+            ),
+            "ai_enabled": (
+                "INTEGER DEFAULT 0"
+            ),
             "ai_channel_id": "INTEGER",
-            "ai_mode": "TEXT DEFAULT 'normal'",
-            "reply_type": "TEXT DEFAULT 'mention'",
-            "permission_preset": "TEXT DEFAULT 'top3'",
+            "ai_mode": (
+                "TEXT DEFAULT 'normal'"
+            ),
+            "reply_type": (
+                "TEXT DEFAULT 'mention'"
+            ),
+            "permission_preset": (
+                "TEXT DEFAULT 'top3'"
+            ),
             "updated_at": "TEXT",
         }
 
@@ -493,20 +671,47 @@ class Database:
 
         ai_columns = {
             "enabled": "INTEGER DEFAULT 0",
+
             "channel_id": "INTEGER",
-            "mode": "TEXT DEFAULT 'normal'",
-            "reply_type": "TEXT DEFAULT 'mention'",
+
+            "mode": (
+                "TEXT DEFAULT 'normal'"
+            ),
+
+            "reply_type": (
+                "TEXT DEFAULT 'mention'"
+            ),
+
             "character_name": (
-                "TEXT DEFAULT 'مساعد السيرفر جيميناي'"
+                "TEXT DEFAULT "
+                "'مساعد السيرفر جيميناي'"
             ),
-            "permission_preset": "TEXT DEFAULT 'top3'",
-            "provider": "TEXT DEFAULT 'google'",
+
+            "permission_preset": (
+                "TEXT DEFAULT 'top3'"
+            ),
+
+            "provider": (
+                "TEXT DEFAULT 'google'"
+            ),
+
             "model": (
-                "TEXT DEFAULT 'gemini-3.5-flash-lite'"
+                "TEXT DEFAULT "
+                "'gemini-3.5-flash-lite'"
             ),
-            "allow_management": "INTEGER DEFAULT 1",
-            "allow_channel_management": "INTEGER DEFAULT 1",
-            "allow_role_management": "INTEGER DEFAULT 1",
+
+            "allow_management": (
+                "INTEGER DEFAULT 1"
+            ),
+
+            "allow_channel_management": (
+                "INTEGER DEFAULT 1"
+            ),
+
+            "allow_role_management": (
+                "INTEGER DEFAULT 1"
+            ),
+
             "updated_at": "TEXT",
         }
 
@@ -521,6 +726,7 @@ class Database:
                 pass
 
         with self._lock:
+
             self.conn.execute(
                 """
                 UPDATE guild_settings
@@ -649,9 +855,12 @@ class Database:
 
             self.conn.commit()
 
+    # ============================================================
+    # DM TABLES
+    # ============================================================
+
     def _create_dm_tables(self):
         with self._lock:
-
             self.conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS ai_dm_settings (
@@ -664,10 +873,11 @@ class Database:
 
             self.conn.commit()
 
+    # ============================================================
+    # MODEL MIGRATION
+    # ============================================================
+
     def _migrate_old_models(self):
-        """
-        Replace old Gemini model names with the current model.
-        """
 
         old_models = (
             "gemini-2.5-flash",
@@ -675,11 +885,11 @@ class Database:
             "gemini-3.6-flash",
         )
 
-        with self._lock:
+        placeholders = ",".join(
+            "?" for _ in old_models
+        )
 
-            placeholders = ",".join(
-                "?" for _ in old_models
-            )
+        with self._lock:
 
             self.conn.execute(
                 f"""
@@ -720,7 +930,7 @@ class Database:
             self.conn.commit()
 
     # ============================================================
-    # DEFAULT CHARACTERS
+    # SYSTEM CHARACTERS
     # ============================================================
 
     def _insert_system_character(
@@ -730,9 +940,17 @@ class Database:
         description: str,
         personality: str,
     ):
+
         now = self._now()
 
+        system_prompt = (
+            personality.strip()
+            if personality
+            else self.DEFAULT_SYSTEM_PROMPT
+        )
+
         with self._lock:
+
             existing = self.conn.execute(
                 """
                 SELECT id
@@ -741,7 +959,10 @@ class Database:
                   AND name = ?
                 LIMIT 1
                 """,
-                (guild_id, name),
+                (
+                    guild_id,
+                    name,
+                ),
             ).fetchone()
 
             if existing:
@@ -754,6 +975,7 @@ class Database:
                     name,
                     description,
                     personality,
+                    system_prompt,
                     character_type,
                     custom_instructions,
                     speaking_style,
@@ -762,13 +984,14 @@ class Database:
                     created_by,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     guild_id,
                     name,
                     description,
                     personality,
+                    system_prompt,
                     "normal",
                     "",
                     self.DEFAULT_SPEAKING_STYLE,
@@ -782,23 +1005,24 @@ class Database:
             self.conn.commit()
 
     def _ensure_dm_character(self):
-        """
-        Creates the DM system character only if it does not exist.
-
-        No duplicate warning is generated.
-        """
 
         self._insert_system_character(
             guild_id=self.DM_GUILD_ID,
             name=self.DM_CHARACTER_NAME,
-            description="المساعد الافتراضي للمحادثات الخاصة.",
+            description=(
+                "المساعد الافتراضي للمحادثات الخاصة."
+            ),
             personality=(
                 "أنت مساعد MyAI في الخاص. "
                 "كن ودودًا ومفيدًا وواضحًا."
             ),
         )
 
-    def _ensure_server_character(self, guild_id: int):
+    def _ensure_server_character(
+        self,
+        guild_id: int,
+    ):
+
         if guild_id == self.DM_GUILD_ID:
             return
 
@@ -825,35 +1049,53 @@ class Database:
         model=None,
         created_by=0,
         description=None,
+        system_prompt=None,
     ) -> Dict[str, Any]:
 
         guild_id = self._safe_int(guild_id)
-        created_by = self._safe_int(created_by)
 
-        name = self._validate_character_name(name)
+        created_by = self._safe_int(
+            created_by
+        )
 
-        personality = self._validate_text(
-            personality,
-            "الشخصية",
-            4000,
-        ) or ""
+        name = self._validate_character_name(
+            name
+        )
+
+        personality = (
+            self._validate_text(
+                personality,
+                "الشخصية",
+                4000,
+            )
+            or ""
+        )
 
         character_type = (
-            str(character_type or "normal").strip()
+            str(
+                character_type
+                or "normal"
+            ).strip()
             or "normal"
         )
 
-        custom_instructions = self._validate_text(
-            custom_instructions,
-            "التعليمات",
-            4000,
-        ) or ""
+        custom_instructions = (
+            self._validate_text(
+                custom_instructions,
+                "التعليمات",
+                4000,
+            )
+            or ""
+        )
 
-        speaking_style = self._validate_text(
-            speaking_style,
-            "أسلوب الكلام",
-            2000,
-        ) or ""
+        speaking_style = (
+            self._validate_text(
+                speaking_style,
+                "أسلوب الكلام",
+                2000,
+            )
+            or ""
+        )
 
         description = self._validate_text(
             description,
@@ -864,16 +1106,33 @@ class Database:
         if description is None:
             description = ""
 
+        # system_prompt:
+        # إذا لم يتم تمريره، نستخدم personality.
+        if system_prompt is None:
+            system_prompt = personality
+
+        system_prompt = (
+            self._validate_text(
+                system_prompt,
+                "System Prompt",
+                8000,
+            )
+            or self.DEFAULT_SYSTEM_PROMPT
+        )
+
         provider = (
-            str(provider or "google")
-            .strip()
-            .lower()
+            str(
+                provider
+                or "google"
+            ).strip().lower()
             or "google"
         )
 
         model = (
-            str(model or self.CURRENT_GOOGLE_MODEL)
-            .strip()
+            str(
+                model
+                or self.CURRENT_GOOGLE_MODEL
+            ).strip()
             or self.CURRENT_GOOGLE_MODEL
         )
 
@@ -889,7 +1148,10 @@ class Database:
                   AND name = ?
                 LIMIT 1
                 """,
-                (guild_id, name),
+                (
+                    guild_id,
+                    name,
+                ),
             ).fetchone()
 
             if existing:
@@ -898,6 +1160,7 @@ class Database:
                 )
 
             try:
+
                 cursor = self.conn.execute(
                     """
                     INSERT INTO characters (
@@ -905,6 +1168,7 @@ class Database:
                         name,
                         description,
                         personality,
+                        system_prompt,
                         character_type,
                         custom_instructions,
                         speaking_style,
@@ -913,13 +1177,14 @@ class Database:
                         created_by,
                         created_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         guild_id,
                         name,
                         description,
                         personality,
+                        system_prompt,
                         character_type,
                         custom_instructions,
                         speaking_style,
@@ -931,16 +1196,12 @@ class Database:
                 )
 
                 character_id = cursor.lastrowid
+
                 self.conn.commit()
 
             except sqlite3.IntegrityError as exc:
-                self.conn.rollback()
 
-                if "description" in str(exc).lower():
-                    raise ValueError(
-                        "فشل إنشاء الشخصية بسبب توافق قاعدة البيانات "
-                        "مع عمود description."
-                    ) from exc
+                self.conn.rollback()
 
                 raise ValueError(
                     f"تعذر إنشاء الشخصية: {exc}"
@@ -967,7 +1228,9 @@ class Database:
         name,
     ) -> Optional[Dict[str, Any]]:
 
-        guild_id = self._safe_int(guild_id)
+        guild_id = self._safe_int(
+            guild_id
+        )
 
         if name is None:
             return None
@@ -975,6 +1238,7 @@ class Database:
         name = str(name).strip()
 
         with self._lock:
+
             row = self.conn.execute(
                 """
                 SELECT *
@@ -983,7 +1247,10 @@ class Database:
                   AND name = ?
                 LIMIT 1
                 """,
-                (guild_id, name),
+                (
+                    guild_id,
+                    name,
+                ),
             ).fetchone()
 
         return dict(row) if row else None
@@ -993,9 +1260,12 @@ class Database:
         character_id,
     ) -> Optional[Dict[str, Any]]:
 
-        character_id = self._safe_int(character_id)
+        character_id = self._safe_int(
+            character_id
+        )
 
         with self._lock:
+
             row = self.conn.execute(
                 """
                 SELECT *
@@ -1013,9 +1283,12 @@ class Database:
         guild_id,
     ) -> List[Dict[str, Any]]:
 
-        guild_id = self._safe_int(guild_id)
+        guild_id = self._safe_int(
+            guild_id
+        )
 
         with self._lock:
+
             rows = self.conn.execute(
                 """
                 SELECT *
@@ -1026,13 +1299,19 @@ class Database:
                 (guild_id,),
             ).fetchall()
 
-        return [dict(row) for row in rows]
+        return [
+            dict(row)
+            for row in rows
+        ]
 
     def list_characters(
         self,
         guild_id,
     ) -> List[Dict[str, Any]]:
-        return self.get_characters(guild_id)
+
+        return self.get_characters(
+            guild_id
+        )
 
     # ============================================================
     # CHARACTER UPDATE
@@ -1050,9 +1329,12 @@ class Database:
         personality=None,
         provider=None,
         model=None,
+        system_prompt=None,
     ) -> Dict[str, Any]:
 
-        guild_id = self._safe_int(guild_id)
+        guild_id = self._safe_int(
+            guild_id
+        )
 
         character = self.get_character(
             guild_id,
@@ -1074,7 +1356,6 @@ class Database:
             0,
         )
 
-        # System characters cannot be edited.
         if guild_id == self.DM_GUILD_ID:
             raise PermissionError(
                 "لا يمكن تعديل شخصية النظام."
@@ -1094,60 +1375,128 @@ class Database:
         values = []
 
         if character_type is not None:
-            updates.append("character_type = ?")
+
+            updates.append(
+                "character_type = ?"
+            )
+
             values.append(
-                str(character_type).strip()
+                str(
+                    character_type
+                ).strip()
                 or "normal"
             )
 
         if custom_instructions is not None:
-            updates.append("custom_instructions = ?")
+
+            updates.append(
+                "custom_instructions = ?"
+            )
+
             values.append(
                 self._validate_text(
                     custom_instructions,
                     "التعليمات",
                     4000,
-                ) or ""
+                )
+                or ""
             )
 
         if speaking_style is not None:
-            updates.append("speaking_style = ?")
+
+            updates.append(
+                "speaking_style = ?"
+            )
+
             values.append(
                 self._validate_text(
                     speaking_style,
                     "أسلوب الكلام",
                     2000,
-                ) or ""
+                )
+                or ""
             )
 
         if description is not None:
-            updates.append("description = ?")
+
+            updates.append(
+                "description = ?"
+            )
+
             values.append(
                 self._validate_text(
                     description,
                     "الوصف",
                     2000,
-                ) or ""
+                )
+                or ""
             )
 
         if personality is not None:
-            updates.append("personality = ?")
-            values.append(
+
+            personality_value = (
                 self._validate_text(
                     personality,
                     "الشخصية",
                     4000,
-                ) or ""
+                )
+                or ""
+            )
+
+            updates.append(
+                "personality = ?"
+            )
+
+            values.append(
+                personality_value
+            )
+
+            # إذا لم يُحدد system_prompt صراحة،
+            # نجعله متوافقًا مع personality الجديدة.
+            if system_prompt is None:
+
+                updates.append(
+                    "system_prompt = ?"
+                )
+
+                values.append(
+                    personality_value
+                    or self.DEFAULT_SYSTEM_PROMPT
+                )
+
+        if system_prompt is not None:
+
+            updates.append(
+                "system_prompt = ?"
+            )
+
+            values.append(
+                self._validate_text(
+                    system_prompt,
+                    "System Prompt",
+                    8000,
+                )
+                or self.DEFAULT_SYSTEM_PROMPT
             )
 
         if provider is not None:
-            updates.append("provider = ?")
+
+            updates.append(
+                "provider = ?"
+            )
+
             values.append(
-                str(provider).strip().lower()
+                str(
+                    provider
+                ).strip().lower()
             )
 
         if model is not None:
-            updates.append("model = ?")
+
+            updates.append(
+                "model = ?"
+            )
+
             values.append(
                 str(model).strip()
             )
@@ -1155,12 +1504,15 @@ class Database:
         if not updates:
             return character
 
-        values.extend([
-            guild_id,
-            name,
-        ])
+        values.extend(
+            [
+                guild_id,
+                name,
+            ]
+        )
 
         with self._lock:
+
             self.conn.execute(
                 f"""
                 UPDATE characters
@@ -1173,10 +1525,13 @@ class Database:
 
             self.conn.commit()
 
-        return self.get_character(
-            guild_id,
-            name,
-        ) or {}
+        return (
+            self.get_character(
+                guild_id,
+                name,
+            )
+            or {}
+        )
 
     # ============================================================
     # CHARACTER DELETE
@@ -1189,7 +1544,9 @@ class Database:
         requester_id=None,
     ) -> bool:
 
-        guild_id = self._safe_int(guild_id)
+        guild_id = self._safe_int(
+            guild_id
+        )
 
         character = self.get_character(
             guild_id,
@@ -1234,7 +1591,10 @@ class Database:
                 WHERE guild_id = ?
                   AND character_name = ?
                 """,
-                (guild_id, name),
+                (
+                    guild_id,
+                    name,
+                ),
             )
 
             self.conn.execute(
@@ -1243,11 +1603,12 @@ class Database:
                 WHERE guild_id = ?
                   AND name = ?
                 """,
-                (guild_id, name),
+                (
+                    guild_id,
+                    name,
+                ),
             )
 
-            # If this was the active character,
-            # return to the default character.
             self.conn.execute(
                 """
                 UPDATE ai_config
@@ -1282,7 +1643,9 @@ class Database:
 
             self.conn.commit()
 
-        self._ensure_server_character(guild_id)
+        self._ensure_server_character(
+            guild_id
+        )
 
         return True
 
@@ -1296,12 +1659,21 @@ class Database:
         character,
     ) -> Dict[str, Any]:
 
-        guild_id = self._safe_int(guild_id)
+        guild_id = self._safe_int(
+            guild_id
+        )
 
         if isinstance(character, dict):
-            character_name = character.get("name")
+
+            character_name = character.get(
+                "name"
+            )
+
         else:
-            character_name = str(character).strip()
+
+            character_name = str(
+                character
+            ).strip()
 
         if not character_name:
             raise ValueError(
@@ -1315,7 +1687,8 @@ class Database:
 
         if not found:
             raise ValueError(
-                f"الشخصية **{character_name}** غير موجودة."
+                f"الشخصية **{character_name}** "
+                "غير موجودة."
             )
 
         now = self._now()
@@ -1367,15 +1740,20 @@ class Database:
         guild_id,
     ) -> Optional[Dict[str, Any]]:
 
-        guild_id = self._safe_int(guild_id)
+        guild_id = self._safe_int(
+            guild_id
+        )
 
         if guild_id == self.DM_GUILD_ID:
+
             return self.get_character(
                 self.DM_GUILD_ID,
                 self.DM_CHARACTER_NAME,
             )
 
-        config = self.get_ai_config(guild_id)
+        config = self.get_ai_config(
+            guild_id
+        )
 
         character_name = config.get(
             "character_name"
@@ -1389,7 +1767,9 @@ class Database:
         if character:
             return character
 
-        self._ensure_server_character(guild_id)
+        self._ensure_server_character(
+            guild_id
+        )
 
         return self.get_character(
             guild_id,
@@ -1404,6 +1784,7 @@ class Database:
         self,
         guild_id: int,
     ):
+
         row = self.conn.execute(
             """
             SELECT guild_id
@@ -1457,6 +1838,7 @@ class Database:
         self,
         guild_id: int,
     ):
+
         row = self.conn.execute(
             """
             SELECT guild_id
@@ -1509,9 +1891,12 @@ class Database:
         guild_id,
     ) -> Dict[str, Any]:
 
-        guild_id = self._safe_int(guild_id)
+        guild_id = self._safe_int(
+            guild_id
+        )
 
         if guild_id == self.DM_GUILD_ID:
+
             return {
                 "guild_id": self.DM_GUILD_ID,
                 "enabled": 1,
@@ -1528,7 +1913,9 @@ class Database:
                 "updated_at": self._now(),
             }
 
-        self._ensure_server_character(guild_id)
+        self._ensure_server_character(
+            guild_id
+        )
 
         with self._lock:
 
@@ -1553,13 +1940,16 @@ class Database:
             ).fetchone()
 
         if not row:
+
             return {
                 "guild_id": guild_id,
                 "enabled": 0,
                 "channel_id": None,
                 "mode": "normal",
                 "reply_type": "mention",
-                "character_name": self.DEFAULT_SERVER_CHARACTER,
+                "character_name": (
+                    self.DEFAULT_SERVER_CHARACTER
+                ),
                 "permission_preset": "top3",
                 "provider": "google",
                 "model": self.CURRENT_GOOGLE_MODEL,
@@ -1603,10 +1993,10 @@ class Database:
         self,
         guild_id,
     ) -> Dict[str, Any]:
-        """
-        Compatibility alias.
-        """
-        return self.get_ai_config(guild_id)
+
+        return self.get_ai_config(
+            guild_id
+        )
 
     def save_ai_config(
         self,
@@ -1614,14 +2004,18 @@ class Database:
         **kwargs,
     ) -> Dict[str, Any]:
 
-        guild_id = self._safe_int(guild_id)
+        guild_id = self._safe_int(
+            guild_id
+        )
 
         if guild_id == self.DM_GUILD_ID:
             return self.get_ai_config(
                 guild_id
             )
 
-        self._ensure_server_character(guild_id)
+        self._ensure_server_character(
+            guild_id
+        )
 
         aliases = {
             "ai_enabled": "enabled",
@@ -1635,8 +2029,12 @@ class Database:
         normalized = {}
 
         for key, value in kwargs.items():
+
             normalized[
-                aliases.get(key, key)
+                aliases.get(
+                    key,
+                    key,
+                )
             ] = value
 
         allowed = {
@@ -1660,6 +2058,7 @@ class Database:
         }
 
         if "enabled" in normalized:
+
             normalized["enabled"] = int(
                 self._safe_bool(
                     normalized["enabled"]
@@ -1667,10 +2066,16 @@ class Database:
             )
 
         if "channel_id" in normalized:
-            value = normalized["channel_id"]
+
+            value = normalized[
+                "channel_id"
+            ]
 
             if value is not None:
-                normalized["channel_id"] = self._safe_int(
+
+                normalized[
+                    "channel_id"
+                ] = self._safe_int(
                     value
                 )
 
@@ -1679,7 +2084,9 @@ class Database:
             "allow_channel_management",
             "allow_role_management",
         ):
+
             if key in normalized:
+
                 normalized[key] = int(
                     self._safe_bool(
                         normalized[key]
@@ -1687,13 +2094,18 @@ class Database:
                 )
 
         if "mode" in normalized:
+
             normalized["mode"] = (
-                str(normalized["mode"] or "normal")
+                str(
+                    normalized["mode"]
+                    or "normal"
+                )
                 .strip()
                 .lower()
             )
 
         if "reply_type" in normalized:
+
             normalized["reply_type"] = (
                 str(
                     normalized["reply_type"]
@@ -1704,6 +2116,7 @@ class Database:
             )
 
         if "provider" in normalized:
+
             normalized["provider"] = (
                 str(
                     normalized["provider"]
@@ -1714,6 +2127,7 @@ class Database:
             )
 
         if "model" in normalized:
+
             normalized["model"] = (
                 str(
                     normalized["model"]
@@ -1722,9 +2136,12 @@ class Database:
             )
 
         if "character_name" in normalized:
+
             character_name = (
                 str(
-                    normalized["character_name"]
+                    normalized[
+                        "character_name"
+                    ]
                     or self.DEFAULT_SERVER_CHARACTER
                 ).strip()
             )
@@ -1733,11 +2150,15 @@ class Database:
                 guild_id,
                 character_name,
             ):
+
                 raise ValueError(
-                    f"الشخصية **{character_name}** غير موجودة."
+                    f"الشخصية **{character_name}** "
+                    "غير موجودة."
                 )
 
-            normalized["character_name"] = character_name
+            normalized[
+                "character_name"
+            ] = character_name
 
         now = self._now()
 
@@ -1757,17 +2178,26 @@ class Database:
                 values = []
 
                 for key, value in normalized.items():
+
                     assignments.append(
                         f"{key} = ?"
                     )
-                    values.append(value)
+
+                    values.append(
+                        value
+                    )
 
                 assignments.append(
                     "updated_at = ?"
                 )
-                values.append(now)
 
-                values.append(guild_id)
+                values.append(
+                    now
+                )
+
+                values.append(
+                    guild_id
+                )
 
                 self.conn.execute(
                     f"""
@@ -1778,7 +2208,6 @@ class Database:
                     values,
                 )
 
-            # Keep guild_settings synchronized.
             mapping = {
                 "character_name": "active_character",
                 "provider": "active_provider",
@@ -1794,10 +2223,13 @@ class Database:
             guild_values = []
 
             for source, target in mapping.items():
+
                 if source in normalized:
+
                     guild_updates.append(
                         f"{target} = ?"
                     )
+
                     guild_values.append(
                         normalized[source]
                     )
@@ -1805,9 +2237,14 @@ class Database:
             guild_updates.append(
                 "updated_at = ?"
             )
-            guild_values.append(now)
 
-            guild_values.append(guild_id)
+            guild_values.append(
+                now
+            )
+
+            guild_values.append(
+                guild_id
+            )
 
             self.conn.execute(
                 f"""
@@ -1829,9 +2266,7 @@ class Database:
         guild_id,
         **kwargs,
     ) -> Dict[str, Any]:
-        """
-        Compatibility alias for older main.py versions.
-        """
+
         return self.save_ai_config(
             guild_id,
             **kwargs,
@@ -1842,9 +2277,12 @@ class Database:
         guild_id,
     ) -> Dict[str, Any]:
 
-        guild_id = self._safe_int(guild_id)
+        guild_id = self._safe_int(
+            guild_id
+        )
 
         if guild_id == self.DM_GUILD_ID:
+
             return {
                 "guild_id": guild_id,
                 "active_character": self.DM_CHARACTER_NAME,
@@ -1858,7 +2296,9 @@ class Database:
                 "updated_at": self._now(),
             }
 
-        self._ensure_server_character(guild_id)
+        self._ensure_server_character(
+            guild_id
+        )
 
         with self._lock:
 
@@ -1897,7 +2337,9 @@ class Database:
         content,
     ) -> bool:
 
-        guild_id = self._safe_int(guild_id)
+        guild_id = self._safe_int(
+            guild_id
+        )
 
         channel_id = (
             self._safe_int(channel_id)
@@ -1923,12 +2365,15 @@ class Database:
             .lower()
         )
 
-        content = str(content or "").strip()
+        content = str(
+            content or ""
+        ).strip()
 
         if not content:
             return False
 
         with self._lock:
+
             self.conn.execute(
                 """
                 INSERT INTO messages (
@@ -1965,10 +2410,11 @@ class Database:
         character_name=None,
         limit=20,
     ) -> List[Dict[str, Any]]:
+
         """
         Get conversation history.
 
-        Supports the normal expected order:
+        Normal order:
 
             guild_id,
             channel_id,
@@ -1976,24 +2422,25 @@ class Database:
             character_name,
             limit
 
-        Also protects against older code passing:
+        Also supports the older wrong order:
 
             guild_id,
             channel_id,
             character_name,
             user_id,
             limit
-
-        This prevents:
-            ValueError:
-            invalid literal for int():
-            'مساعد السيرفر جيميناي'
         """
 
-        guild_id = self._safe_int(guild_id)
+        guild_id = self._safe_int(
+            guild_id
+        )
 
         # --------------------------------------------------------
-        # Detect old/wrong positional order automatically.
+        # Detect:
+        #
+        # user_id = "مساعد السيرفر جيميناي"
+        #
+        # which caused the previous crash.
         # --------------------------------------------------------
 
         if (
@@ -2004,19 +2451,22 @@ class Database:
                 or str(character_name).isdigit()
             )
         ):
+
             old_character_name = user_id
             old_user_id = character_name
 
             user_id = old_user_id
             character_name = old_character_name
 
-        # Another possible order:
-        # guild_id, channel_id, character_name, user_id, limit
         if (
             isinstance(user_id, str)
             and not user_id.isdigit()
-            and isinstance(character_name, (int, float))
+            and isinstance(
+                character_name,
+                (int, float),
+            )
         ):
+
             old_character_name = user_id
             old_user_id = character_name
 
@@ -2026,32 +2476,50 @@ class Database:
         channel_id_value = None
 
         if channel_id is not None:
-            channel_id_value = self._safe_int(
-                channel_id
+
+            channel_id_value = (
+                self._safe_int(
+                    channel_id
+                )
             )
 
         user_id_value = None
 
         if user_id is not None:
-            user_id_value = self._safe_int(
-                user_id
+
+            user_id_value = (
+                self._safe_int(
+                    user_id
+                )
             )
 
         character_name_value = None
 
         if character_name is not None:
+
             character_name_value = (
-                str(character_name).strip()
+                str(
+                    character_name
+                ).strip()
             )
 
         try:
+
             limit = int(limit)
-        except (TypeError, ValueError):
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
             limit = 20
 
         limit = max(
             1,
-            min(limit, 100),
+            min(
+                limit,
+                100,
+            ),
         )
 
         conditions = [
@@ -2063,30 +2531,38 @@ class Database:
         ]
 
         if channel_id_value is not None:
+
             conditions.append(
                 "channel_id = ?"
             )
+
             values.append(
                 channel_id_value
             )
 
         if user_id_value is not None:
+
             conditions.append(
                 "user_id = ?"
             )
+
             values.append(
                 user_id_value
             )
 
         if character_name_value:
+
             conditions.append(
                 "character_name = ?"
             )
+
             values.append(
                 character_name_value
             )
 
-        values.append(limit)
+        values.append(
+            limit
+        )
 
         query = f"""
             SELECT
@@ -2105,13 +2581,16 @@ class Database:
         """
 
         with self._lock:
+
             rows = self.conn.execute(
                 query,
                 values,
             ).fetchall()
 
-        # AI prompts normally need oldest -> newest.
-        rows = list(reversed(rows))
+        # Oldest -> newest.
+        rows = list(
+            reversed(rows)
+        )
 
         return [
             dict(row)
@@ -2126,7 +2605,9 @@ class Database:
         character_name=None,
     ) -> int:
 
-        guild_id = self._safe_int(guild_id)
+        guild_id = self._safe_int(
+            guild_id
+        )
 
         conditions = [
             "guild_id = ?"
@@ -2137,27 +2618,39 @@ class Database:
         ]
 
         if channel_id is not None:
+
             conditions.append(
                 "channel_id = ?"
             )
+
             values.append(
-                self._safe_int(channel_id)
+                self._safe_int(
+                    channel_id
+                )
             )
 
         if user_id is not None:
+
             conditions.append(
                 "user_id = ?"
             )
+
             values.append(
-                self._safe_int(user_id)
+                self._safe_int(
+                    user_id
+                )
             )
 
         if character_name is not None:
+
             conditions.append(
                 "character_name = ?"
             )
+
             values.append(
-                str(character_name).strip()
+                str(
+                    character_name
+                ).strip()
             )
 
         with self._lock:
@@ -2182,6 +2675,7 @@ class Database:
         *args,
         **kwargs,
     ) -> int:
+
         return self.clear_history(
             guild_id,
             *args,
@@ -2202,6 +2696,7 @@ class Database:
         )
 
         with self._lock:
+
             row = self.conn.execute(
                 """
                 SELECT enabled
@@ -2233,7 +2728,9 @@ class Database:
         )
 
         enabled_value = int(
-            self._safe_bool(enabled)
+            self._safe_bool(
+                enabled
+            )
         )
 
         now = self._now()
@@ -2251,6 +2748,7 @@ class Database:
             ).fetchone()
 
             if existing:
+
                 self.conn.execute(
                     """
                     UPDATE ai_dm_settings
@@ -2264,7 +2762,9 @@ class Database:
                         user_id,
                     ),
                 )
+
             else:
+
                 self.conn.execute(
                     """
                     INSERT INTO ai_dm_settings (
@@ -2283,7 +2783,9 @@ class Database:
 
             self.conn.commit()
 
-        return bool(enabled_value)
+        return bool(
+            enabled_value
+        )
 
     # ============================================================
     # UTILITY METHODS
@@ -2294,6 +2796,7 @@ class Database:
         guild_id,
         name,
     ) -> bool:
+
         return (
             self.get_character(
                 guild_id,
@@ -2317,7 +2820,9 @@ class Database:
             return None
 
         return self._safe_int(
-            character.get("created_by"),
+            character.get(
+                "created_by"
+            ),
             0,
         )
 
@@ -2326,7 +2831,9 @@ class Database:
     # ============================================================
 
     def close(self):
+
         with self._lock:
+
             try:
                 self.conn.commit()
             except Exception:
