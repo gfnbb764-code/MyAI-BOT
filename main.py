@@ -1893,22 +1893,70 @@ class CharacterUseSelect(
         interaction: discord.Interaction
     ):
 
+        # ----------------------------------------------------
+        # ACKNOWLEDGE IMMEDIATELY
+        # ----------------------------------------------------
+
+        try:
+            await interaction.response.defer(
+                ephemeral=True
+            )
+
+        except discord.NotFound:
+            return
+
+        except discord.HTTPException:
+            traceback.print_exc()
+            return
+
         if not interaction.guild:
+
+            try:
+                await interaction.edit_original_response(
+                    content="❌ هذا الأمر متاح داخل السيرفر فقط.",
+                    view=None
+                )
+            except Exception:
+                pass
+
             return
 
         name = self.values[0]
 
-        character = get_character(
-            self.guild_id,
-            name
-        )
+        # ----------------------------------------------------
+        # GET CHARACTER
+        # ----------------------------------------------------
+
+        try:
+
+            character = get_character(
+                self.guild_id,
+                name
+            )
+
+        except Exception:
+
+            traceback.print_exc()
+
+            try:
+                await interaction.edit_original_response(
+                    content="❌ حدث خطأ أثناء البحث عن الشخصية.",
+                    view=None
+                )
+            except Exception:
+                pass
+
+            return
 
         if not character:
 
-            await interaction.response.send_message(
-                "❌ الشخصية غير موجودة.",
-                ephemeral=True
-            )
+            try:
+                await interaction.edit_original_response(
+                    content="❌ الشخصية غير موجودة.",
+                    view=None
+                )
+            except Exception:
+                pass
 
             return
 
@@ -1922,17 +1970,31 @@ class CharacterUseSelect(
             data.get("owner_id")
         )
 
+        # ----------------------------------------------------
+        # PERMISSION CHECK
+        # ----------------------------------------------------
+
         if owner_id not in {
             0,
             interaction.user.id
         }:
 
-            await interaction.response.send_message(
-                "❌ يمكنك تفعيل شخصياتك فقط، أو الشخصية الافتراضية للسيرفر.",
-                ephemeral=True
-            )
+            try:
+                await interaction.edit_original_response(
+                    content=(
+                        "❌ يمكنك تفعيل شخصياتك فقط، "
+                        "أو الشخصية الافتراضية للسيرفر."
+                    ),
+                    view=None
+                )
+            except Exception:
+                pass
 
             return
+
+        # ----------------------------------------------------
+        # ACTIVATE CHARACTER
+        # ----------------------------------------------------
 
         try:
 
@@ -1946,29 +2008,43 @@ class CharacterUseSelect(
 
             if not success:
 
-                await interaction.response.send_message(
-                    "❌ تعذر تفعيل الشخصية.",
-                    ephemeral=True
-                )
+                try:
+                    await interaction.edit_original_response(
+                        content="❌ تعذر تفعيل الشخصية.",
+                        view=None
+                    )
+                except Exception:
+                    pass
 
                 return
 
-            await interaction.response.send_message(
-                (
-                    f"✅ تم تفعيل شخصيتك **{name}**.\n"
-                    "هذه الشخصية تخصك أنت فقط."
-                ),
-                ephemeral=True
-            )
+            try:
+
+                await interaction.edit_original_response(
+                    content=(
+                        f"✅ تم تفعيل شخصيتك **{name}**.\n"
+                        "هذه الشخصية تخصك أنت فقط."
+                    ),
+                    view=None
+                )
+
+            except discord.NotFound:
+                pass
+
+            except discord.HTTPException:
+                traceback.print_exc()
 
         except Exception:
 
             traceback.print_exc()
 
-            await interaction.response.send_message(
-                "❌ تعذر تفعيل الشخصية.",
-                ephemeral=True
-            )
+            try:
+                await interaction.edit_original_response(
+                    content="❌ تعذر تفعيل الشخصية.",
+                    view=None
+                )
+            except Exception:
+                pass
 
 
 class CharacterUseView(
@@ -2915,10 +2991,13 @@ class AISettingsView(
             member
         ):
 
-            await interaction.response.send_message(
-                "❌ لوحة AI مخصصة لأعلى 3 رتب فقط.",
-                ephemeral=True
-            )
+            try:
+                await interaction.response.send_message(
+                    "❌ لوحة AI مخصصة لأعلى 3 رتب فقط.",
+                    ephemeral=True
+                )
+            except Exception:
+                pass
 
             return False
 
@@ -3300,10 +3379,12 @@ class ReplyTypeSelect(
 
             traceback.print_exc()
 
-            await interaction.response.send_message(
-                "❌ تعذر تحديث طريقة الرد.",
-                ephemeral=True
-            )
+            if not interaction.response.is_done():
+
+                await interaction.response.send_message(
+                    "❌ تعذر تحديث طريقة الرد.",
+                    ephemeral=True
+                )
 
 
 class ReplyTypeView(
@@ -3410,10 +3491,12 @@ class ModeSelect(
 
             traceback.print_exc()
 
-            await interaction.response.send_message(
-                "❌ تعذر تحديث الوضع.",
-                ephemeral=True
-            )
+            if not interaction.response.is_done():
+
+                await interaction.response.send_message(
+                    "❌ تعذر تحديث الوضع.",
+                    ephemeral=True
+                )
 
 
 class ModeView(
@@ -3525,10 +3608,12 @@ class CharacterDashboardSelect(
 
             traceback.print_exc()
 
-            await interaction.response.send_message(
-                "❌ تعذر تفعيل الشخصية.",
-                ephemeral=True
-            )
+            if not interaction.response.is_done():
+
+                await interaction.response.send_message(
+                    "❌ تعذر تفعيل الشخصية.",
+                    ephemeral=True
+                )
 
 
 class CharacterDashboardView(
@@ -3629,10 +3714,12 @@ class ChannelSelect(
 
             traceback.print_exc()
 
-            await interaction.response.send_message(
-                "❌ تعذر تحديث الروم.",
-                ephemeral=True
-            )
+            if not interaction.response.is_done():
+
+                await interaction.response.send_message(
+                    "❌ تعذر تحديث الروم.",
+                    ephemeral=True
+                )
 
 
 class ChannelView(
@@ -3915,19 +4002,23 @@ async def character_create(
 
             traceback.print_exc()
 
-            await interaction.response.send_message(
-                "❌ تعذر إنشاء الشخصية. ربما الاسم مستخدم مسبقًا.",
-                ephemeral=True
-            )
+            if not interaction.response.is_done():
+
+                await interaction.response.send_message(
+                    "❌ تعذر إنشاء الشخصية. ربما الاسم مستخدم مسبقًا.",
+                    ephemeral=True
+                )
 
     except Exception:
 
         traceback.print_exc()
 
-        await interaction.response.send_message(
-            "❌ تعذر إنشاء الشخصية. ربما الاسم مستخدم مسبقًا.",
-            ephemeral=True
-        )
+        if not interaction.response.is_done():
+
+            await interaction.response.send_message(
+                "❌ تعذر إنشاء الشخصية. ربما الاسم مستخدم مسبقًا.",
+                ephemeral=True
+            )
 
 
 @bot.tree.command(
@@ -3970,15 +4061,54 @@ async def character_info(
 async def character_use(
     interaction: discord.Interaction
 ):
-    if not interaction.guild:
+    # --------------------------------------------------------
+    # ACKNOWLEDGE IMMEDIATELY
+    # --------------------------------------------------------
+
+    try:
+        await interaction.response.defer(
+            ephemeral=True
+        )
+
+    except discord.NotFound:
         return
 
-    characters = list(
-        get_user_characters(
-            interaction.guild.id,
-            interaction.user.id
+    except discord.HTTPException:
+        traceback.print_exc()
+        return
+
+    if not interaction.guild:
+
+        try:
+            await interaction.edit_original_response(
+                content="❌ هذا الأمر متاح داخل السيرفر فقط."
+            )
+        except Exception:
+            pass
+
+        return
+
+    try:
+
+        characters = list(
+            get_user_characters(
+                interaction.guild.id,
+                interaction.user.id
+            )
         )
-    )
+
+    except Exception:
+
+        traceback.print_exc()
+
+        try:
+            await interaction.edit_original_response(
+                content="❌ تعذر تحميل الشخصيات."
+            )
+        except Exception:
+            pass
+
+        return
 
     try:
 
@@ -4027,25 +4157,34 @@ async def character_use(
 
     if not characters:
 
-        await interaction.response.send_message(
-            (
-                "❌ لا توجد شخصيات متاحة لك. "
-                "أنشئ شخصية أولًا باستخدام "
-                "`/character_create`."
-            ),
-            ephemeral=True
-        )
+        try:
+            await interaction.edit_original_response(
+                content=(
+                    "❌ لا توجد شخصيات متاحة لك. "
+                    "أنشئ شخصية أولًا باستخدام "
+                    "`/character_create`."
+                )
+            )
+        except Exception:
+            pass
 
         return
 
-    await interaction.response.send_message(
-        "🎭 اختر شخصيتك الخاصة:",
-        view=CharacterUseView(
-            interaction.guild.id,
-            characters
-        ),
-        ephemeral=True
-    )
+    try:
+
+        await interaction.edit_original_response(
+            content="🎭 اختر شخصيتك الخاصة:",
+            view=CharacterUseView(
+                interaction.guild.id,
+                characters
+            )
+        )
+
+    except discord.NotFound:
+        pass
+
+    except discord.HTTPException:
+        traceback.print_exc()
 
 
 @bot.tree.command(
@@ -4357,10 +4496,12 @@ async def ai_dm(
 
         traceback.print_exc()
 
-        await interaction.response.send_message(
-            "❌ تعذر تحديث إعداد الخاص.",
-            ephemeral=True
-        )
+        if not interaction.response.is_done():
+
+            await interaction.response.send_message(
+                "❌ تعذر تحديث إعداد الخاص.",
+                ephemeral=True
+            )
 
 
 # ============================================================
@@ -4790,25 +4931,68 @@ async def on_app_command_error(
     error: app_commands.AppCommandError
 ):
 
-    traceback.print_exc()
+    traceback.print_exception(
+        type(error),
+        error,
+        error.__traceback__
+    )
 
     message = (
         "❌ حدث خطأ أثناء تنفيذ الأمر."
     )
 
-    if interaction.response.is_done():
+    try:
 
-        await interaction.followup.send(
-            message,
-            ephemeral=True
-        )
+        if interaction.response.is_done():
 
-    else:
+            try:
+
+                await interaction.followup.send(
+                    message,
+                    ephemeral=True
+                )
+
+            except discord.NotFound:
+                # 10062 - Unknown interaction
+                return
+
+            except discord.HTTPException as exc:
+
+                if getattr(
+                    exc,
+                    "code",
+                    None
+                ) == 40060:
+                    # 40060 - Already acknowledged
+                    return
+
+                traceback.print_exc()
+
+            return
 
         await interaction.response.send_message(
             message,
             ephemeral=True
         )
+
+    except discord.NotFound:
+        # 10062 - Unknown interaction
+        return
+
+    except discord.HTTPException as exc:
+
+        if getattr(
+            exc,
+            "code",
+            None
+        ) == 40060:
+            return
+
+        traceback.print_exc()
+
+    except Exception:
+
+        traceback.print_exc()
 
 
 # ============================================================
