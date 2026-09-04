@@ -59,7 +59,11 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def normalize_bool(value, default=False):
+def normalize_bool(
+    value,
+    default=False
+):
+
     if value is None:
         return default
 
@@ -69,7 +73,9 @@ def normalize_bool(value, default=False):
     if isinstance(value, (int, float)):
         return bool(value)
 
-    text = str(value).strip().lower()
+    text = str(
+        value
+    ).strip().lower()
 
     if text in {
         "1",
@@ -94,11 +100,18 @@ def normalize_bool(value, default=False):
     return default
 
 
-def safe_json_loads(value, default):
+def safe_json_loads(
+    value,
+    default
+):
+
     if value is None:
         return default
 
-    if isinstance(value, (list, dict)):
+    if isinstance(
+        value,
+        (list, dict)
+    ):
         return value
 
     try:
@@ -107,7 +120,10 @@ def safe_json_loads(value, default):
         return default
 
 
-def normalize_list(value):
+def normalize_list(
+    value
+):
+
     if value is None:
         return []
 
@@ -118,14 +134,21 @@ def normalize_list(value):
         return list(value)
 
     if isinstance(value, str):
+
         value = value.strip()
 
         if not value:
             return []
 
-        parsed = safe_json_loads(value, None)
+        parsed = safe_json_loads(
+            value,
+            None
+        )
 
-        if isinstance(parsed, list):
+        if isinstance(
+            parsed,
+            list
+        ):
             return parsed
 
         return [
@@ -137,22 +160,33 @@ def normalize_list(value):
     return [value]
 
 
-def row_to_dict(row):
+def row_to_dict(
+    row
+):
+
     if row is None:
         return None
 
-    if isinstance(row, dict):
+    if isinstance(
+        row,
+        dict
+    ):
         return row
 
     try:
         return dict(row)
+
     except Exception:
+
         try:
+
             return {
                 key: row[key]
                 for key in row.keys()
             }
+
         except Exception:
+
             return {}
 
 
@@ -162,9 +196,15 @@ def row_to_dict(row):
 
 class Database:
 
-    def __init__(self, path: Optional[str] = None):
+    def __init__(
+        self,
+        path: Optional[str] = None
+    ):
 
-        self.path = path or DB_PATH
+        self.path = (
+            path
+            or DB_PATH
+        )
 
         self.conn = sqlite3.connect(
             self.path,
@@ -194,7 +234,9 @@ class Database:
     # TABLE CREATION
     # ========================================================
 
-    def _create_tables(self):
+    def _create_tables(
+        self
+    ):
 
         # ----------------------------------------------------
         # CHARACTERS
@@ -221,6 +263,7 @@ class Database:
 
         # ----------------------------------------------------
         # MESSAGES
+        # guild_id = 0 => DM memory
         # ----------------------------------------------------
 
         self.conn.execute("""
@@ -278,13 +321,18 @@ class Database:
         """)
 
         # ----------------------------------------------------
-        # DM SETTINGS
+        # BASIC DM SETTINGS
         # ----------------------------------------------------
 
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS ai_dm_settings (
                 user_id INTEGER PRIMARY KEY,
                 enabled INTEGER DEFAULT 0,
+                active_character TEXT,
+                reply_mode TEXT DEFAULT 'always',
+                mode TEXT DEFAULT 'normal',
+                history_limit INTEGER DEFAULT 20,
+                response_length INTEGER DEFAULT 1200,
                 updated_at TEXT
             )
         """)
@@ -313,7 +361,6 @@ class Database:
 
         # ----------------------------------------------------
         # USER CHARACTER SETTINGS
-        # كل مستخدم يمكن أن يختار شخصيته الخاصة
         # ----------------------------------------------------
 
         self.conn.execute("""
@@ -323,6 +370,29 @@ class Database:
                 character_name TEXT,
                 updated_at TEXT,
                 PRIMARY KEY (guild_id, user_id)
+            )
+        """)
+
+        # ----------------------------------------------------
+        # DM CHARACTERS
+        # كل شخصية هنا مرتبطة بمستخدم واحد.
+        # ----------------------------------------------------
+
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS dm_characters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                personality TEXT DEFAULT '',
+                system_prompt TEXT DEFAULT '',
+                character_type TEXT DEFAULT 'normal',
+                custom_instructions TEXT DEFAULT '',
+                speaking_style TEXT DEFAULT '',
+                provider TEXT DEFAULT 'google',
+                model TEXT DEFAULT 'gemini-3.5-flash-lite',
+                created_at TEXT,
+                UNIQUE(user_id, name)
             )
         """)
 
@@ -355,21 +425,30 @@ class Database:
             ON user_character_settings(guild_id, user_id)
         """)
 
+        self.conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_dm_characters_user
+            ON dm_characters(user_id)
+        """)
+
         self.conn.commit()
 
     # ========================================================
     # MIGRATIONS
     # ========================================================
 
-    def _column_exists(self, table_name, column_name):
+    def _column_exists(
+        self,
+        table_name,
+        column_name
+    ):
 
-        row = self.conn.execute(
+        rows = self.conn.execute(
             f"PRAGMA table_info({table_name})"
         ).fetchall()
 
         return any(
             item["name"] == column_name
-            for item in row
+            for item in rows
         )
 
     def _add_column_if_missing(
@@ -391,7 +470,9 @@ class Database:
                 """
             )
 
-    def _migrate_tables(self):
+    def _migrate_tables(
+        self
+    ):
 
         # ----------------------------------------------------
         # CHARACTERS
@@ -608,13 +689,43 @@ class Database:
         )
 
         # ----------------------------------------------------
-        # DM
+        # DM SETTINGS
         # ----------------------------------------------------
 
         self._add_column_if_missing(
             "ai_dm_settings",
             "enabled",
             "INTEGER DEFAULT 0"
+        )
+
+        self._add_column_if_missing(
+            "ai_dm_settings",
+            "active_character",
+            "TEXT"
+        )
+
+        self._add_column_if_missing(
+            "ai_dm_settings",
+            "reply_mode",
+            "TEXT DEFAULT 'always'"
+        )
+
+        self._add_column_if_missing(
+            "ai_dm_settings",
+            "mode",
+            "TEXT DEFAULT 'normal'"
+        )
+
+        self._add_column_if_missing(
+            "ai_dm_settings",
+            "history_limit",
+            "INTEGER DEFAULT 20"
+        )
+
+        self._add_column_if_missing(
+            "ai_dm_settings",
+            "response_length",
+            "INTEGER DEFAULT 1200"
         )
 
         self._add_column_if_missing(
@@ -705,7 +816,9 @@ class Database:
     # DATABASE REPAIR
     # ========================================================
 
-    def _repair_database(self):
+    def _repair_database(
+        self
+    ):
 
         now = utc_now()
 
@@ -839,6 +952,40 @@ class Database:
 
         self.conn.execute(
             """
+            UPDATE ai_dm_settings
+            SET reply_mode = 'always'
+            WHERE reply_mode IS NULL
+               OR reply_mode = ''
+            """
+        )
+
+        self.conn.execute(
+            """
+            UPDATE ai_dm_settings
+            SET mode = 'normal'
+            WHERE mode IS NULL
+               OR mode = ''
+            """
+        )
+
+        self.conn.execute(
+            """
+            UPDATE ai_dm_settings
+            SET history_limit = 20
+            WHERE history_limit IS NULL
+            """
+        )
+
+        self.conn.execute(
+            """
+            UPDATE ai_dm_settings
+            SET response_length = 1200
+            WHERE response_length IS NULL
+            """
+        )
+
+        self.conn.execute(
+            """
             UPDATE ai_advanced_settings
             SET memory_enabled = 1
             WHERE memory_enabled IS NULL
@@ -957,9 +1104,12 @@ class Database:
         model: str = CURRENT_GOOGLE_MODEL,
     ):
 
-        name = (name or "").strip()
+        name = (
+            name or ""
+        ).strip()
 
         if not name:
+
             raise ValueError(
                 "Character name cannot be empty."
             )
@@ -1028,7 +1178,7 @@ class Database:
         if not name:
             return None
 
-        row = self.conn.execute(
+        return self.conn.execute(
             """
             SELECT *
             FROM characters
@@ -1042,14 +1192,12 @@ class Database:
             )
         ).fetchone()
 
-        return row
-
     def get_character_by_id(
         self,
         character_id: int
     ):
 
-        row = self.conn.execute(
+        return self.conn.execute(
             """
             SELECT *
             FROM characters
@@ -1058,8 +1206,6 @@ class Database:
             """,
             (character_id,)
         ).fetchone()
-
-        return row
 
     def get_characters(
         self,
@@ -1072,7 +1218,10 @@ class Database:
             FROM characters
             WHERE guild_id = ?
             ORDER BY
-                CASE WHEN created_by = 0 THEN 0 ELSE 1 END,
+                CASE
+                    WHEN created_by = 0 THEN 0
+                    ELSE 1
+                END,
                 name COLLATE NOCASE ASC
             """,
             (guild_id,)
@@ -1134,18 +1283,21 @@ class Database:
                 continue
 
             if key == "provider":
+
                 value = (
                     value
                     or "google"
                 ).strip().lower()
 
             elif key == "model":
+
                 value = (
                     value
                     or CURRENT_GOOGLE_MODEL
                 ).strip()
 
             elif key == "character_type":
+
                 value = (
                     value
                     or "normal"
@@ -1154,7 +1306,10 @@ class Database:
             updates.append(
                 f"{key} = ?"
             )
-            values.append(value or "")
+
+            values.append(
+                value or ""
+            )
 
         if not updates:
             return False
@@ -1192,14 +1347,15 @@ class Database:
         if not character:
             return False
 
-        data = row_to_dict(character)
+        data = row_to_dict(
+            character
+        ) or {}
 
         owner_id = data.get(
             "created_by",
             0
         )
 
-        # الشخصية الافتراضية لا تُحذف
         if owner_id == 0:
             return False
 
@@ -1215,7 +1371,6 @@ class Database:
             )
         )
 
-        # إزالة التعيينات الشخصية المتعلقة بها
         self.conn.execute(
             """
             DELETE FROM user_character_settings
@@ -1289,10 +1444,20 @@ class Database:
         character
     ):
 
-        if isinstance(character, sqlite3.Row):
-            character = row_to_dict(character)
+        if isinstance(
+            character,
+            sqlite3.Row
+        ):
 
-        if isinstance(character, dict):
+            character = row_to_dict(
+                character
+            )
+
+        if isinstance(
+            character,
+            dict
+        ):
+
             character = character.get(
                 "name"
             )
@@ -1366,17 +1531,23 @@ class Database:
         )
 
         name = (
-            config.get("character_name")
+            config.get(
+                "character_name"
+            )
             if config
             else None
         )
 
         if not name:
-            name = self._get_guild_active_character_name(
-                guild_id
+
+            name = (
+                self._get_guild_active_character_name(
+                    guild_id
+                )
             )
 
         if name:
+
             character = self.get_character(
                 guild_id,
                 name
@@ -1385,7 +1556,6 @@ class Database:
             if character:
                 return character
 
-        # أنشئ الشخصية الافتراضية للسيرفر إذا لم توجد
         character = self.get_character(
             guild_id,
             DEFAULT_SERVER_CHARACTER
@@ -1433,10 +1603,12 @@ class Database:
         if not row:
             return None
 
-        return row["active_character"]
+        return row[
+            "active_character"
+        ]
 
     # ========================================================
-    # USER ACTIVE CHARACTER
+    # USER ACTIVE CHARACTER - SERVER
     # ========================================================
 
     def set_user_active_character(
@@ -1461,9 +1633,10 @@ class Database:
         if not character:
             return False
 
-        data = row_to_dict(character)
+        data = row_to_dict(
+            character
+        ) or {}
 
-        # المستخدم لا يستطيع تفعيل شخصية لا يملكها
         owner_id = data.get(
             "created_by",
             0
@@ -1473,6 +1646,7 @@ class Database:
             0,
             user_id
         }:
+
             return False
 
         now = utc_now()
@@ -1526,7 +1700,9 @@ class Database:
         if not row:
             return None
 
-        name = row["character_name"]
+        name = row[
+            "character_name"
+        ]
 
         if not name:
             return None
@@ -1553,11 +1729,12 @@ class Database:
         )
 
         if not character:
-            # الشخصية حُذفت أو لم تعد موجودة
+
             self.clear_user_active_character(
                 guild_id,
                 user_id
             )
+
             return None
 
         return character
@@ -1604,6 +1781,7 @@ class Database:
         ).fetchone()
 
         if not row:
+
             result = {
                 "guild_id": guild_id,
                 "enabled": 1,
@@ -1620,58 +1798,84 @@ class Database:
             }
 
         else:
-            result = row_to_dict(row)
+
+            result = row_to_dict(
+                row
+            )
 
         result["enabled"] = normalize_bool(
-            result.get("enabled"),
+            result.get(
+                "enabled"
+            ),
             True
         )
 
         result["provider"] = (
-            result.get("provider")
+            result.get(
+                "provider"
+            )
             or "google"
         )
 
         result["model"] = (
-            result.get("model")
+            result.get(
+                "model"
+            )
             or CURRENT_GOOGLE_MODEL
         )
 
         result["mode"] = (
-            result.get("mode")
+            result.get(
+                "mode"
+            )
             or "normal"
         )
 
         result["reply_type"] = (
-            result.get("reply_type")
+            result.get(
+                "reply_type"
+            )
             or "mention"
         )
 
-        # Compatibility aliases
-        result["ai_enabled"] = result["enabled"]
-
-        result["ai_channel_id"] = result.get(
-            "channel_id"
+        result["ai_enabled"] = (
+            result["enabled"]
         )
 
-        result["active_character"] = result.get(
-            "character_name"
+        result["ai_channel_id"] = (
+            result.get(
+                "channel_id"
+            )
         )
 
-        result["active_provider"] = result.get(
-            "provider"
+        result["active_character"] = (
+            result.get(
+                "character_name"
+            )
         )
 
-        result["active_model"] = result.get(
-            "model"
+        result["active_provider"] = (
+            result.get(
+                "provider"
+            )
         )
 
-        result["ai_mode"] = result.get(
-            "mode"
+        result["active_model"] = (
+            result.get(
+                "model"
+            )
         )
 
-        result["character"] = result.get(
-            "character_name"
+        result["ai_mode"] = (
+            result.get(
+                "mode"
+            )
+        )
+
+        result["character"] = (
+            result.get(
+                "character_name"
+            )
         )
 
         return result
@@ -1730,8 +1934,11 @@ class Database:
         for key in allowed:
 
             if key not in normalized:
-                normalized[key] = current.get(
-                    key
+
+                normalized[key] = (
+                    current.get(
+                        key
+                    )
                 )
 
         normalized["enabled"] = int(
@@ -1936,12 +2143,17 @@ class Database:
     # ADVANCED SETTINGS
     # ========================================================
 
-    def _default_advanced_settings(self):
+    def _default_advanced_settings(
+        self
+    ):
 
         return {
             key: (
                 value.copy()
-                if isinstance(value, list)
+                if isinstance(
+                    value,
+                    list
+                )
                 else value
             )
             for key, value in
@@ -1964,11 +2176,16 @@ class Database:
         ).fetchone()
 
         if not row:
+
             return self._default_advanced_settings()
 
-        data = row_to_dict(row)
+        data = row_to_dict(
+            row
+        ) or {}
 
-        result = self._default_advanced_settings()
+        result = (
+            self._default_advanced_settings()
+        )
 
         for key in [
             "memory_enabled",
@@ -1985,6 +2202,7 @@ class Database:
                 key in data
                 and data[key] is not None
             ):
+
                 result[key] = data[key]
 
         for key in [
@@ -1997,17 +2215,25 @@ class Database:
                 key
             )
 
-            if isinstance(value, str):
+            if isinstance(
+                value,
+                str
+            ):
 
                 parsed = safe_json_loads(
                     value,
                     None
                 )
 
-                if isinstance(parsed, list):
+                if isinstance(
+                    parsed,
+                    list
+                ):
+
                     value = parsed
 
                 else:
+
                     value = [
                         x.strip()
                         for x in value.split(",")
@@ -2018,26 +2244,36 @@ class Database:
                 value,
                 list
             ):
-                value = result[key].copy()
+
+                value = result[
+                    key
+                ].copy()
 
             result[key] = value
 
-        result["memory_enabled"] = normalize_bool(
-            result["memory_enabled"],
-            True
+        result["memory_enabled"] = (
+            normalize_bool(
+                result["memory_enabled"],
+                True
+            )
         )
 
-        result["security_enabled"] = normalize_bool(
-            result["security_enabled"],
-            True
+        result["security_enabled"] = (
+            normalize_bool(
+                result["security_enabled"],
+                True
+            )
         )
 
-        result["bot_chat_enabled"] = normalize_bool(
-            result["bot_chat_enabled"],
-            True
+        result["bot_chat_enabled"] = (
+            normalize_bool(
+                result["bot_chat_enabled"],
+                True
+            )
         )
 
         try:
+
             result["history_limit"] = max(
                 0,
                 min(
@@ -2049,9 +2285,11 @@ class Database:
             )
 
         except Exception:
+
             result["history_limit"] = 20
 
         try:
+
             result["response_length"] = max(
                 100,
                 min(
@@ -2063,9 +2301,11 @@ class Database:
             )
 
         except Exception:
+
             result["response_length"] = 1200
 
         try:
+
             result["timeout"] = max(
                 10,
                 min(
@@ -2077,9 +2317,11 @@ class Database:
             )
 
         except Exception:
+
             result["timeout"] = 35
 
         try:
+
             result["bot_chat_max_chain"] = max(
                 1,
                 min(
@@ -2093,9 +2335,11 @@ class Database:
             )
 
         except Exception:
+
             result["bot_chat_max_chain"] = 6
 
         try:
+
             result["bot_chat_cooldown"] = max(
                 0.0,
                 min(
@@ -2109,6 +2353,7 @@ class Database:
             )
 
         except Exception:
+
             result["bot_chat_cooldown"] = 2.0
 
         return result
@@ -2120,22 +2365,24 @@ class Database:
         **kwargs
     ):
 
-        # يدعم:
-        # save_ai_advanced_settings(guild_id, settings)
-        # و:
-        # save_ai_advanced_settings(guild_id, **settings)
-
         settings = {}
 
         if args:
-            if len(args) == 1 and isinstance(
-                args[0],
-                dict
+
+            if (
+                len(args) == 1
+                and isinstance(
+                    args[0],
+                    dict
+                )
             ):
+
                 settings.update(
                     args[0]
                 )
+
             else:
+
                 raise TypeError(
                     "Expected a settings dictionary."
                 )
@@ -2144,30 +2391,39 @@ class Database:
             kwargs
         )
 
-        current = self.get_ai_advanced_settings(
-            guild_id
+        current = (
+            self.get_ai_advanced_settings(
+                guild_id
+            )
         )
 
         current.update(
             settings
         )
 
-        current["memory_enabled"] = normalize_bool(
-            current["memory_enabled"],
-            True
+        current["memory_enabled"] = (
+            normalize_bool(
+                current["memory_enabled"],
+                True
+            )
         )
 
-        current["security_enabled"] = normalize_bool(
-            current["security_enabled"],
-            True
+        current["security_enabled"] = (
+            normalize_bool(
+                current["security_enabled"],
+                True
+            )
         )
 
-        current["bot_chat_enabled"] = normalize_bool(
-            current["bot_chat_enabled"],
-            True
+        current["bot_chat_enabled"] = (
+            normalize_bool(
+                current["bot_chat_enabled"],
+                True
+            )
         )
 
         try:
+
             current["history_limit"] = max(
                 0,
                 min(
@@ -2177,10 +2433,13 @@ class Database:
                     )
                 )
             )
+
         except Exception:
+
             current["history_limit"] = 20
 
         try:
+
             current["response_length"] = max(
                 100,
                 min(
@@ -2190,10 +2449,13 @@ class Database:
                     )
                 )
             )
+
         except Exception:
+
             current["response_length"] = 1200
 
         try:
+
             current["timeout"] = max(
                 10,
                 min(
@@ -2203,10 +2465,13 @@ class Database:
                     )
                 )
             )
+
         except Exception:
+
             current["timeout"] = 35
 
         try:
+
             current["bot_chat_max_chain"] = max(
                 1,
                 min(
@@ -2218,10 +2483,13 @@ class Database:
                     )
                 )
             )
+
         except Exception:
+
             current["bot_chat_max_chain"] = 6
 
         try:
+
             current["bot_chat_cooldown"] = max(
                 0.0,
                 min(
@@ -2233,7 +2501,9 @@ class Database:
                     )
                 )
             )
+
         except Exception:
+
             current["bot_chat_cooldown"] = 2.0
 
         allow_members = normalize_list(
@@ -2291,14 +2561,24 @@ class Database:
             """,
             (
                 guild_id,
-                int(current["memory_enabled"]),
+                int(
+                    current["memory_enabled"]
+                ),
                 current["history_limit"],
                 current["response_length"],
                 current["timeout"],
-                int(current["security_enabled"]),
-                int(current["bot_chat_enabled"]),
-                current["bot_chat_max_chain"],
-                current["bot_chat_cooldown"],
+                int(
+                    current["security_enabled"]
+                ),
+                int(
+                    current["bot_chat_enabled"]
+                ),
+                current[
+                    "bot_chat_max_chain"
+                ],
+                current[
+                    "bot_chat_cooldown"
+                ],
                 json.dumps(
                     allow_members,
                     ensure_ascii=False
@@ -2324,7 +2604,9 @@ class Database:
         guild_id: int
     ):
 
-        defaults = self._default_advanced_settings()
+        defaults = (
+            self._default_advanced_settings()
+        )
 
         return self.save_ai_advanced_settings(
             guild_id,
@@ -2404,11 +2686,14 @@ class Database:
     ):
 
         try:
+
             limit = max(
                 0,
                 int(limit)
             )
+
         except Exception:
+
             limit = 20
 
         if limit <= 0:
@@ -2427,6 +2712,45 @@ class Database:
             (
                 guild_id,
                 channel_id,
+                user_id,
+                limit
+            )
+        ).fetchall()
+
+        return list(
+            reversed(rows)
+        )
+
+    def get_dm_history(
+        self,
+        user_id: int,
+        limit: int = 20
+    ):
+
+        try:
+
+            limit = max(
+                0,
+                int(limit)
+            )
+
+        except Exception:
+
+            limit = 20
+
+        if limit <= 0:
+            return []
+
+        rows = self.conn.execute(
+            """
+            SELECT *
+            FROM messages
+            WHERE guild_id = 0
+              AND user_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (
                 user_id,
                 limit
             )
@@ -2504,6 +2828,24 @@ class Database:
 
         return cursor.rowcount
 
+    def clear_dm_memory(
+        self,
+        user_id: int
+    ):
+
+        cursor = self.conn.execute(
+            """
+            DELETE FROM messages
+            WHERE guild_id = 0
+              AND user_id = ?
+            """,
+            (user_id,)
+        )
+
+        self.conn.commit()
+
+        return cursor.rowcount
+
     def clear_memory(
         self,
         guild_id: int
@@ -2523,45 +2865,37 @@ class Database:
         enabled: bool
     ):
 
-        now = utc_now()
-
-        self.conn.execute(
-            """
-            INSERT INTO ai_dm_settings (
-                user_id,
-                enabled,
-                updated_at
-            )
-            VALUES (?, ?, ?)
-            ON CONFLICT(user_id)
-            DO UPDATE SET
-                enabled = excluded.enabled,
-                updated_at = excluded.updated_at
-            """,
-            (
-                user_id,
-                int(
-                    normalize_bool(
-                        enabled,
-                        False
-                    )
-                ),
-                now
+        return self.update_dm_settings(
+            user_id,
+            enabled=int(
+                normalize_bool(
+                    enabled,
+                    False
+                )
             )
         )
-
-        self.conn.commit()
-
-        return True
 
     def get_dm_enabled(
         self,
         user_id: int
     ):
 
+        settings = self.get_dm_settings(
+            user_id
+        )
+
+        return settings[
+            "enabled"
+        ]
+
+    def get_dm_settings(
+        self,
+        user_id: int
+    ):
+
         row = self.conn.execute(
             """
-            SELECT enabled
+            SELECT *
             FROM ai_dm_settings
             WHERE user_id = ?
             LIMIT 1
@@ -2570,20 +2904,613 @@ class Database:
         ).fetchone()
 
         if not row:
+
+            self.conn.execute(
+                """
+                INSERT INTO ai_dm_settings (
+                    user_id,
+                    enabled,
+                    active_character,
+                    reply_mode,
+                    mode,
+                    history_limit,
+                    response_length,
+                    updated_at
+                )
+                VALUES (?, 0, NULL, 'always', 'normal', 20, 1200, ?)
+                """,
+                (
+                    user_id,
+                    utc_now()
+                )
+            )
+
+            self.conn.commit()
+
+            row = self.conn.execute(
+                """
+                SELECT *
+                FROM ai_dm_settings
+                WHERE user_id = ?
+                LIMIT 1
+                """,
+                (user_id,)
+            ).fetchone()
+
+        data = (
+            row_to_dict(row)
+            or {}
+        )
+
+        try:
+
+            history_limit = max(
+                0,
+                min(
+                    100,
+                    int(
+                        data.get(
+                            "history_limit",
+                            20
+                        )
+                    )
+                )
+            )
+
+        except Exception:
+
+            history_limit = 20
+
+        try:
+
+            response_length = max(
+                100,
+                min(
+                    4000,
+                    int(
+                        data.get(
+                            "response_length",
+                            1200
+                        )
+                    )
+                )
+            )
+
+        except Exception:
+
+            response_length = 1200
+
+        reply_mode = (
+            data.get(
+                "reply_mode"
+            )
+            or "always"
+        ).strip().lower()
+
+        if reply_mode not in {
+            "always",
+            "called",
+            "off",
+        }:
+
+            reply_mode = "always"
+
+        mode = (
+            data.get(
+                "mode"
+            )
+            or "normal"
+        ).strip().lower()
+
+        if not mode:
+            mode = "normal"
+
+        return {
+            "user_id": user_id,
+            "enabled": normalize_bool(
+                data.get(
+                    "enabled"
+                ),
+                False
+            ),
+            "active_character": data.get(
+                "active_character"
+            ),
+            "reply_mode": reply_mode,
+            "mode": mode,
+            "history_limit": history_limit,
+            "response_length": response_length,
+        }
+
+    def update_dm_settings(
+        self,
+        user_id: int,
+        **kwargs
+    ):
+
+        current = self.get_dm_settings(
+            user_id
+        )
+
+        allowed = {
+            "enabled",
+            "active_character",
+            "reply_mode",
+            "mode",
+            "history_limit",
+            "response_length",
+        }
+
+        for key, value in kwargs.items():
+
+            if key not in allowed:
+                continue
+
+            current[key] = value
+
+        current["enabled"] = int(
+            normalize_bool(
+                current.get(
+                    "enabled"
+                ),
+                False
+            )
+        )
+
+        reply_mode = (
+            str(
+                current.get(
+                    "reply_mode",
+                    "always"
+                )
+            )
+            .strip()
+            .lower()
+        )
+
+        if reply_mode not in {
+            "always",
+            "called",
+            "off",
+        }:
+
+            reply_mode = "always"
+
+        current["reply_mode"] = reply_mode
+
+        current["mode"] = (
+            str(
+                current.get(
+                    "mode",
+                    "normal"
+                )
+                or "normal"
+            )
+            .strip()
+            .lower()
+        )
+
+        try:
+
+            current["history_limit"] = max(
+                0,
+                min(
+                    100,
+                    int(
+                        current.get(
+                            "history_limit",
+                            20
+                        )
+                    )
+                )
+            )
+
+        except Exception:
+
+            current["history_limit"] = 20
+
+        try:
+
+            current["response_length"] = max(
+                100,
+                min(
+                    4000,
+                    int(
+                        current.get(
+                            "response_length",
+                            1200
+                        )
+                    )
+                )
+            )
+
+        except Exception:
+
+            current["response_length"] = 1200
+
+        self.conn.execute(
+            """
+            INSERT INTO ai_dm_settings (
+                user_id,
+                enabled,
+                active_character,
+                reply_mode,
+                mode,
+                history_limit,
+                response_length,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id)
+            DO UPDATE SET
+                enabled = excluded.enabled,
+                active_character = excluded.active_character,
+                reply_mode = excluded.reply_mode,
+                mode = excluded.mode,
+                history_limit = excluded.history_limit,
+                response_length = excluded.response_length,
+                updated_at = excluded.updated_at
+            """,
+            (
+                user_id,
+                current["enabled"],
+                current["active_character"],
+                current["reply_mode"],
+                current["mode"],
+                current["history_limit"],
+                current["response_length"],
+                utc_now()
+            )
+        )
+
+        self.conn.commit()
+
+        return True
+
+    # ========================================================
+    # DM CHARACTERS
+    # ========================================================
+
+    def create_dm_character(
+        self,
+        user_id: int,
+        name: str,
+        description: str = "",
+        personality: str = "",
+        system_prompt: str = "",
+        character_type: str = "normal",
+        custom_instructions: str = "",
+        speaking_style: str = "",
+        provider: str = "google",
+        model: str = CURRENT_GOOGLE_MODEL,
+    ):
+
+        name = (
+            name or ""
+        ).strip()
+
+        if not name:
+
+            raise ValueError(
+                "DM character name cannot be empty."
+            )
+
+        character_type = (
+            character_type
+            or "normal"
+        ).strip()
+
+        provider = (
+            provider
+            or "google"
+        ).strip().lower()
+
+        model = (
+            model
+            or CURRENT_GOOGLE_MODEL
+        ).strip()
+
+        try:
+
+            cursor = self.conn.execute(
+                """
+                INSERT INTO dm_characters (
+                    user_id,
+                    name,
+                    description,
+                    personality,
+                    system_prompt,
+                    character_type,
+                    custom_instructions,
+                    speaking_style,
+                    provider,
+                    model,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    name,
+                    description or "",
+                    personality or "",
+                    system_prompt or "",
+                    character_type,
+                    custom_instructions or "",
+                    speaking_style or "",
+                    provider,
+                    model,
+                    utc_now()
+                )
+            )
+
+            self.conn.commit()
+
+            return cursor.lastrowid
+
+        except sqlite3.IntegrityError:
+
             return False
 
-        return normalize_bool(
-            row["enabled"],
-            False
+    def get_dm_character(
+        self,
+        user_id: int,
+        name: str
+    ):
+
+        if not name:
+            return None
+
+        return self.conn.execute(
+            """
+            SELECT *
+            FROM dm_characters
+            WHERE user_id = ?
+              AND name = ?
+            LIMIT 1
+            """,
+            (
+                user_id,
+                name
+            )
+        ).fetchone()
+
+    def get_dm_characters(
+        self,
+        user_id: int
+    ):
+
+        return self.conn.execute(
+            """
+            SELECT *
+            FROM dm_characters
+            WHERE user_id = ?
+            ORDER BY name COLLATE NOCASE ASC
+            """,
+            (user_id,)
+        ).fetchall()
+
+    def get_active_dm_character(
+        self,
+        user_id: int
+    ):
+
+        settings = self.get_dm_settings(
+            user_id
         )
+
+        name = settings.get(
+            "active_character"
+        )
+
+        if not name:
+            return None
+
+        character = self.get_dm_character(
+            user_id,
+            name
+        )
+
+        if not character:
+
+            self.update_dm_settings(
+                user_id,
+                active_character=None
+            )
+
+            return None
+
+        return character
+
+    def set_active_dm_character(
+        self,
+        user_id: int,
+        character_name: str
+    ):
+
+        character_name = (
+            character_name or ""
+        ).strip()
+
+        if not character_name:
+            return False
+
+        character = self.get_dm_character(
+            user_id,
+            character_name
+        )
+
+        if not character:
+            return False
+
+        return self.update_dm_settings(
+            user_id,
+            active_character=character_name
+        )
+
+    def update_dm_character(
+        self,
+        user_id: int,
+        name: str,
+        **kwargs
+    ):
+
+        allowed = {
+            "description",
+            "personality",
+            "system_prompt",
+            "character_type",
+            "custom_instructions",
+            "speaking_style",
+            "provider",
+            "model",
+        }
+
+        updates = []
+        values = []
+
+        for key, value in kwargs.items():
+
+            if key not in allowed:
+                continue
+
+            if key == "provider":
+
+                value = (
+                    value
+                    or "google"
+                ).strip().lower()
+
+            elif key == "model":
+
+                value = (
+                    value
+                    or CURRENT_GOOGLE_MODEL
+                ).strip()
+
+            elif key == "character_type":
+
+                value = (
+                    value
+                    or "normal"
+                ).strip()
+
+            updates.append(
+                f"{key} = ?"
+            )
+
+            values.append(
+                value or ""
+            )
+
+        if not updates:
+            return False
+
+        values.extend([
+            user_id,
+            name
+        ])
+
+        cursor = self.conn.execute(
+            f"""
+            UPDATE dm_characters
+            SET {", ".join(updates)}
+            WHERE user_id = ?
+              AND name = ?
+            """,
+            values
+        )
+
+        self.conn.commit()
+
+        return cursor.rowcount > 0
+
+    def delete_dm_character(
+        self,
+        user_id: int,
+        name: str
+    ):
+
+        character = self.get_dm_character(
+            user_id,
+            name
+        )
+
+        if not character:
+            return False
+
+        settings = self.get_dm_settings(
+            user_id
+        )
+
+        cursor = self.conn.execute(
+            """
+            DELETE FROM dm_characters
+            WHERE user_id = ?
+              AND name = ?
+            """,
+            (
+                user_id,
+                name
+            )
+        )
+
+        if cursor.rowcount <= 0:
+            return False
+
+        if settings.get(
+            "active_character"
+        ) == name:
+
+            self.conn.execute(
+                """
+                UPDATE ai_dm_settings
+                SET active_character = NULL,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (
+                    utc_now(),
+                    user_id
+                )
+            )
+
+        self.conn.commit()
+
+        return True
+
+    def dm_character_exists(
+        self,
+        user_id: int,
+        name: str
+    ):
+
+        row = self.conn.execute(
+            """
+            SELECT id
+            FROM dm_characters
+            WHERE user_id = ?
+              AND name = ?
+            LIMIT 1
+            """,
+            (
+                user_id,
+                name
+            )
+        ).fetchone()
+
+        return row is not None
 
     # ========================================================
     # CLOSE
     # ========================================================
 
-    def close(self):
+    def close(
+        self
+    ):
 
         try:
             self.conn.close()
+
         except Exception:
             pass
