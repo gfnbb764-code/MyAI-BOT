@@ -139,23 +139,9 @@ class AIEngine:
 
         self.db = db
 
-        self.google_key = os.getenv(
-            "GOOGLE_API_KEY",
-            "",
-        ).strip() or os.getenv(
-            "GEMINI_API_KEY",
-            "",
-        ).strip()
-
-        self.openai_key = os.getenv(
-            "OPENAI_API_KEY",
-            "",
-        ).strip()
-
-        self.anthropic_key = os.getenv(
-            "ANTHROPIC_API_KEY",
-            "",
-        ).strip()
+        self.google_key = ""
+        self.openai_key = ""
+        self.anthropic_key = ""
 
         self.google_base_url = (
             "https://generativelanguage.googleapis.com/"
@@ -177,6 +163,8 @@ class AIEngine:
             ),
             90,
         )
+
+        self.reload_keys()
 
     # ========================================================
     # RELOAD API KEYS
@@ -419,7 +407,7 @@ class AIEngine:
         )
 
     # ========================================================
-    # READ HTTP ERROR
+    # HTTP ERROR
     # ========================================================
 
     async def _read_error(
@@ -492,13 +480,11 @@ class AIEngine:
             if not text:
                 continue
 
-            if role == "assistant":
-
-                gemini_role = "model"
-
-            else:
-
-                gemini_role = "user"
+            gemini_role = (
+                "model"
+                if role == "assistant"
+                else "user"
+            )
 
             contents.append(
                 {
@@ -509,6 +495,12 @@ class AIEngine:
                         }
                     ],
                 }
+            )
+
+        if not contents:
+
+            raise RuntimeError(
+                "No messages were provided to Google."
             )
 
         payload = {
@@ -678,11 +670,23 @@ class AIEngine:
             if not content:
                 continue
 
+            if role not in (
+                "user",
+                "assistant",
+            ):
+                continue
+
             input_messages.append(
                 {
                     "role": role,
                     "content": content,
                 }
+            )
+
+        if not input_messages:
+
+            raise RuntimeError(
+                "No messages were provided to OpenAI."
             )
 
         payload = {
@@ -750,9 +754,12 @@ class AIEngine:
 
         if output_text:
 
-            return str(
+            result = str(
                 output_text
             ).strip()
+
+            if result:
+                return result
 
         outputs = data.get(
             "output",
@@ -843,6 +850,12 @@ class AIEngine:
                     "role": role,
                     "content": content,
                 }
+            )
+
+        if not anthropic_messages:
+
+            raise RuntimeError(
+                "No messages were provided to Anthropic."
             )
 
         payload = {
@@ -1010,9 +1023,7 @@ class AIEngine:
 
         if not primary_provider:
 
-            primary_provider = (
-                DEFAULT_PROVIDER
-            )
+            primary_provider = DEFAULT_PROVIDER
 
         attempts = []
 
@@ -1048,9 +1059,7 @@ class AIEngine:
                     provider,
                     self.resolve_model(
                         provider,
-                        fallback_defaults[
-                            provider
-                        ],
+                        fallback_defaults[provider],
                     ),
                 )
             )
@@ -1147,19 +1156,37 @@ class AIEngine:
 
     # ========================================================
     # GENERATE
+    #
+    # Compatible with main.py:
+    #
+    # guild_id
+    # channel_id
+    # user_id
+    # prompt
+    # character
+    # mode
+    # provider
+    # model
+    # history_limit
+    # max_tokens_override
+    #
+    # **kwargs protects against future optional arguments.
     # ========================================================
 
     async def generate(
         self,
-        guild_id: Optional[int],
-        user_id: Optional[int],
-        prompt: str,
+        guild_id: Optional[int] = None,
+        channel_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        prompt: str = "",
+        character: Optional[Dict[str, Any]] = None,
         mode: Optional[str] = None,
         provider: Optional[str] = None,
         model: Optional[str] = None,
-        character_name: Optional[str] = None,
-        channel_id: Optional[int] = None,
+        history_limit: Optional[int] = None,
         max_tokens_override: Optional[int] = None,
+        character_name: Optional[str] = None,
+        **kwargs: Any,
     ) -> str:
 
         prompt = _clean_text(
@@ -1173,28 +1200,52 @@ class AIEngine:
             )
 
         # ----------------------------------------------------
+        # EXTRA ARGUMENT PROTECTION
+        # ----------------------------------------------------
+
+        if kwargs:
+
+            print(
+                "[AI] Ignoring unsupported optional "
+                "arguments: "
+                + ", ".join(
+                    str(key)
+                    for key in kwargs.keys()
+                )
+            )
+
+        # ----------------------------------------------------
         # CHARACTER
         # ----------------------------------------------------
 
-        character = None
+        if character is not None:
 
-        try:
-
-            if user_id is not None:
-
-                character = (
-                    self.db.get_user_active_character(
-                        user_id,
-                        guild_id,
-                    )
-                )
-
-        except Exception as exc:
-
-            print(
-                "[AI] User character lookup failed: "
-                f"{exc}"
+            character = self.row_to_dict(
+                character
             )
+
+        # If main.py already supplied the character,
+        # DO NOT replace it with another character.
+
+        if not character:
+
+            try:
+
+                if user_id is not None:
+
+                    character = (
+                        self.db.get_user_active_character(
+                            user_id,
+                            guild_id,
+                        )
+                    )
+
+            except Exception as exc:
+
+                print(
+                    "[AI] User character lookup failed: "
+                    f"{exc}"
+                )
 
         if not character and guild_id is not None:
 
@@ -1212,6 +1263,12 @@ class AIEngine:
                     "[AI] Guild character lookup failed: "
                     f"{exc}"
                 )
+
+        if character:
+
+            character = self.row_to_dict(
+                character
+            )
 
         if not character:
 
@@ -1251,7 +1308,12 @@ class AIEngine:
                     "normal",
                 )
 
-            except Exception:
+            except Exception as exc:
+
+                print(
+                    "[AI] Mode lookup failed: "
+                    f"{exc}"
+                )
 
                 mode = "normal"
 
@@ -1311,9 +1373,7 @@ class AIEngine:
 
         if not selected_provider:
 
-            selected_provider = (
-                DEFAULT_PROVIDER
-            )
+            selected_provider = DEFAULT_PROVIDER
 
         # ----------------------------------------------------
         # MODEL
@@ -1338,13 +1398,22 @@ class AIEngine:
         # HISTORY
         # ----------------------------------------------------
 
-        history_limit = _safe_int(
-            advanced.get(
-                "history",
+        if history_limit is None:
+
+            history_limit = _safe_int(
+                advanced.get(
+                    "history",
+                    20,
+                ),
                 20,
-            ),
-            20,
-        )
+            )
+
+        else:
+
+            history_limit = _safe_int(
+                history_limit,
+                20,
+            )
 
         if history_limit < 0:
 
@@ -1506,6 +1575,10 @@ class AIEngine:
             f"[AI] mode={mode_name}"
         )
 
+        print(
+            f"[AI] history_limit={history_limit}"
+        )
+
         if channel_id is not None:
 
             print(
@@ -1575,67 +1648,75 @@ class AIEngine:
 
         # ----------------------------------------------------
         # MEMORY
+        #
+        # IMPORTANT:
+        # main.py already saves guild messages through
+        # on_message. To avoid duplicating guild history,
+        # only AIEngine handles memory for DM-style calls
+        # where guild_id == 0.
+        #
+        # For guild calls, main.py remains the source that
+        # records the Discord messages.
         # ----------------------------------------------------
 
+        memory_enabled = advanced.get(
+            "memory",
+            True,
+        )
+
         if (
-            guild_id is not None
+            memory_enabled
+            and guild_id == 0
             and user_id is not None
         ):
 
-            memory_enabled = advanced.get(
-                "memory",
-                True,
-            )
+            try:
 
-            if memory_enabled:
+                self.db.add_message(
+                    guild_id=0,
+                    user_id=user_id,
+                    role="user",
+                    content=prompt,
+                )
+
+                self.db.add_message(
+                    guild_id=0,
+                    user_id=user_id,
+                    role="assistant",
+                    content=result,
+                )
+
+            except TypeError:
 
                 try:
 
                     self.db.add_message(
-                        guild_id=guild_id,
-                        user_id=user_id,
-                        role="user",
-                        content=prompt,
+                        0,
+                        user_id,
+                        "user",
+                        prompt,
                     )
 
                     self.db.add_message(
-                        guild_id=guild_id,
-                        user_id=user_id,
-                        role="assistant",
-                        content=result,
+                        0,
+                        user_id,
+                        "assistant",
+                        result,
                     )
-
-                except TypeError:
-
-                    try:
-
-                        self.db.add_message(
-                            guild_id,
-                            user_id,
-                            "user",
-                            prompt,
-                        )
-
-                        self.db.add_message(
-                            guild_id,
-                            user_id,
-                            "assistant",
-                            result,
-                        )
-
-                    except Exception as exc:
-
-                        print(
-                            "[AI] Memory save failed: "
-                            f"{exc}"
-                        )
 
                 except Exception as exc:
 
                     print(
-                        "[AI] Memory save failed: "
+                        "[AI] DM memory save failed: "
                         f"{exc}"
                     )
+
+            except Exception as exc:
+
+                print(
+                    "[AI] DM memory save failed: "
+                    f"{exc}"
+                )
 
         return result
 
@@ -1645,25 +1726,31 @@ class AIEngine:
 
     async def generate_proactive(
         self,
-        guild_id: Optional[int],
-        user_id: Optional[int],
-        prompt: str,
+        guild_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        prompt: str = "",
         mode: Optional[str] = "active",
         provider: Optional[str] = None,
         model: Optional[str] = None,
         character_name: Optional[str] = None,
+        character: Optional[Dict[str, Any]] = None,
         channel_id: Optional[int] = None,
+        history_limit: Optional[int] = None,
         max_tokens_override: Optional[int] = None,
+        **kwargs: Any,
     ) -> str:
 
         return await self.generate(
             guild_id=guild_id,
+            channel_id=channel_id,
             user_id=user_id,
             prompt=prompt,
+            character=character,
             mode=mode or "active",
             provider=provider,
             model=model,
             character_name=character_name,
-            channel_id=channel_id,
+            history_limit=history_limit,
             max_tokens_override=max_tokens_override,
+            **kwargs,
         )
