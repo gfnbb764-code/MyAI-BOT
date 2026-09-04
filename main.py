@@ -13,7 +13,6 @@ from discord import app_commands
 
 from database import Database
 from ai_engine import AIEngine
-from ai_group import AIGroupManager
 
 
 # ============================================================
@@ -187,12 +186,6 @@ AI_SEMAPHORE = asyncio.Semaphore(
 )
 
 ACTIVE_REQUESTS = set()
-
-# يتم تهيئته داخل setup_hook
-ai_group = None
-
-# مهمة تشغيل البوتات الثانوية في الخلفية
-SECONDARY_STARTUP_TASK = None
 
 
 # ============================================================
@@ -1390,143 +1383,6 @@ async def generate_chat_reply(
         ACTIVE_REQUESTS.discard(
             request_key
         )
-
-
-# ============================================================
-# AI GROUP GENERATION BRIDGE
-# ============================================================
-
-async def ai_group_generate(
-    guild_id: int,
-    slot: int,
-    user_id: int,
-    channel_id: int,
-    prompt: str,
-    bot_name: str,
-    personality: str,
-    speaking_style: str,
-    power: int,
-):
-    """
-    AI Group uses the SAME Provider + Model as MyAI.
-
-    AI Group already builds its own:
-        - conversation context
-        - per-bot memory
-        - character/personality context
-
-    Therefore the normal MyAI SQLite history is disabled
-    here to avoid duplicating context and wasting input tokens.
-    """
-
-    config = get_config(
-        guild_id
-    )
-
-    advanced = get_advanced(
-        guild_id
-    )
-
-    provider = config.get(
-        "provider",
-        PRIMARY_AI_PROVIDER
-    )
-
-    model = config.get(
-        "model",
-        GOOGLE_MODEL
-    )
-
-    character = {
-        "name": bot_name,
-
-        "description": (
-            f"عضو رقم {slot} في مجموعة MyAI."
-        ),
-
-        "personality": (
-            personality
-            or "ودود، ذكي، طبيعي."
-        ),
-
-        "speaking_style": (
-            speaking_style
-            or "تكلم بشكل طبيعي ومختصر."
-        ),
-
-        "custom_instructions": (
-            f"أنت العضو رقم {slot} في مجموعة AI. "
-            f"قوة شخصيتك الحالية {power}/100. "
-            "لا تدّعي أنك البوت الرئيسي."
-        ),
-
-        "system_prompt": "",
-
-        "character_type": "normal",
-
-        "provider": provider,
-
-        "model": model,
-    }
-
-    response_length = int(
-        advanced.get(
-            "response_length",
-            1200
-        )
-    )
-
-    timeout = int(
-        advanced.get(
-            "timeout",
-            DEFAULT_AI_TIMEOUT
-        )
-    )
-
-    mode = config.get(
-        "mode",
-        "normal"
-    )
-
-    async with AI_SEMAPHORE:
-
-        result = await asyncio.wait_for(
-
-            ai.generate(
-
-                guild_id=guild_id,
-
-                channel_id=channel_id,
-
-                user_id=user_id,
-
-                prompt=prompt,
-
-                character=character,
-
-                mode=mode,
-
-                provider=provider,
-
-                model=model,
-
-                # ====================================================
-                # IMPORTANT:
-                # AI Group already has its own conversation + memory.
-                # Do NOT add the normal SQLite history again.
-                # ====================================================
-                history_limit=0,
-
-                max_tokens_override=response_length,
-
-            ),
-
-            timeout=timeout
-        )
-
-        return str(
-            result or ""
-        ).strip()
 
 
 # ============================================================
@@ -4528,34 +4384,6 @@ async def on_message(
         return
 
     # --------------------------------------------------------
-    # AI GROUP
-    # --------------------------------------------------------
-
-    if (
-        ai_group is not None
-        and message.guild is not None
-        and not message.author.bot
-    ):
-
-        try:
-
-            consumed = await ai_group.handle_message(
-                message
-            )
-
-            if consumed:
-
-                await bot.process_commands(
-                    message
-                )
-
-                return
-
-        except Exception:
-
-            traceback.print_exc()
-
-    # --------------------------------------------------------
     # DIRECT MESSAGES
     # --------------------------------------------------------
 
@@ -4949,17 +4777,6 @@ async def on_ready():
         f"Servers: {len(bot.guilds)}"
     )
 
-    if ai_group is not None:
-
-        print(
-            (
-                "[AI_GROUP] "
-                f"{ai_group.ready_count()}/"
-                f"{ai_group.configured_count()} "
-                "secondary bots online"
-            )
-        )
-
     print("=" * 60)
 
 
@@ -4992,136 +4809,6 @@ async def on_app_command_error(
             message,
             ephemeral=True
         )
-
-
-# ============================================================
-# SECONDARY BOT STARTUP
-# ============================================================
-
-async def start_secondary_bots_safe():
-
-    global ai_group
-
-    if ai_group is None:
-
-        print(
-            "[AI_GROUP] Manager is not initialized."
-        )
-
-        return
-
-    try:
-
-        # ai_group.start_clients() مسؤول عن
-        # رسائل تشغيل البوتات الثانوية.
-        await ai_group.start_clients()
-
-    except asyncio.CancelledError:
-
-        print(
-            "[AI_GROUP] Secondary startup task cancelled."
-        )
-
-        raise
-
-    except Exception:
-
-        print(
-            "[FATAL] Secondary bot startup failed:"
-        )
-
-        traceback.print_exc()
-
-
-# ============================================================
-# SETUP HOOK
-# ============================================================
-
-@bot.event
-async def setup_hook():
-
-    global ai_group
-    global SECONDARY_STARTUP_TASK
-
-    try:
-
-        # ----------------------------------------------------
-        # إنشاء مدير AI Group
-        # ----------------------------------------------------
-
-        ai_group = AIGroupManager(
-            main_bot=bot,
-            db_path=db.path,
-            ai_generate=ai_group_generate,
-        )
-
-        # ----------------------------------------------------
-        # تسجيل أمر /ai_group
-        # ----------------------------------------------------
-
-        await ai_group.register_command(
-            bot.tree
-        )
-
-        # ----------------------------------------------------
-        # Sync commands
-        # ----------------------------------------------------
-
-        synced = await bot.tree.sync()
-
-        print(
-            f"[commands] synced {len(synced)} commands"
-        )
-
-        print(
-            (
-                "[AI_GROUP] "
-                f"configured="
-                f"{ai_group.configured_count()}/5"
-            )
-        )
-
-        # ----------------------------------------------------
-        # تشغيل البوتات الثانوية في الخلفية
-        # ----------------------------------------------------
-
-        if (
-            SECONDARY_STARTUP_TASK is None
-            or SECONDARY_STARTUP_TASK.done()
-        ):
-
-            SECONDARY_STARTUP_TASK = (
-                asyncio.create_task(
-                    start_secondary_bots_safe(),
-                    name="secondary_bot_startup",
-                )
-            )
-
-            print(
-                "[AI_GROUP] Secondary bots are "
-                "starting in the background..."
-            )
-
-        else:
-
-            print(
-                "[AI_GROUP] Secondary startup task "
-                "already exists."
-            )
-
-    except asyncio.CancelledError:
-
-        raise
-
-    except Exception:
-
-        print(
-            "[FATAL] setup_hook failed:"
-        )
-
-        traceback.print_exc()
-
-        raise
 
 
 # ============================================================
