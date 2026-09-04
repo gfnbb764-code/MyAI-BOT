@@ -108,21 +108,32 @@ CHARACTER_TYPES = {
 # HELPERS
 # ============================================================
 
-def _safe_int(value: Any, default: int) -> int:
+def _safe_int(
+    value: Any,
+    default: int
+) -> int:
+
     try:
         return int(value)
     except Exception:
         return default
 
 
-def _safe_float(value: Any, default: float) -> float:
+def _safe_float(
+    value: Any,
+    default: float
+) -> float:
+
     try:
         return float(value)
     except Exception:
         return default
 
 
-def _clean_text(value: Any) -> str:
+def _clean_text(
+    value: Any
+) -> str:
+
     if value is None:
         return ""
 
@@ -135,7 +146,10 @@ def _clean_text(value: Any) -> str:
 
 class AIEngine:
 
-    def __init__(self, db):
+    def __init__(
+        self,
+        db
+    ):
 
         self.db = db
 
@@ -208,7 +222,14 @@ class AIEngine:
         try:
             return dict(row)
         except Exception:
-            return {}
+
+            try:
+                return {
+                    key: row[key]
+                    for key in row.keys()
+                }
+            except Exception:
+                return {}
 
     # ========================================================
     # MODE
@@ -331,17 +352,40 @@ class AIEngine:
             character.get("description")
         )
 
-        character_type = _clean_text(
-            character.get("type")
-        ) or "normal"
+        character_type = (
+            _clean_text(
+                character.get(
+                    "character_type"
+                )
+            )
+            or _clean_text(
+                character.get("type")
+            )
+            or "normal"
+        )
 
         personality = _clean_text(
             character.get("personality")
         )
 
-        mode_name = _clean_text(
-            mode
-        ).lower() or "normal"
+        speaking_style = _clean_text(
+            character.get("speaking_style")
+        )
+
+        custom_instructions = _clean_text(
+            character.get("custom_instructions")
+        )
+
+        system_prompt_custom = _clean_text(
+            character.get("system_prompt")
+        )
+
+        mode_name = (
+            _clean_text(
+                mode
+            ).lower()
+            or "normal"
+        )
 
         type_description = (
             self.get_character_type_description(
@@ -369,6 +413,25 @@ class AIEngine:
                 f"شخصية المساعد: {personality}"
             )
 
+        if speaking_style:
+
+            prompt_parts.append(
+                f"أسلوب الكلام: {speaking_style}"
+            )
+
+        if custom_instructions:
+
+            prompt_parts.append(
+                f"تعليمات مخصصة: {custom_instructions}"
+            )
+
+        if system_prompt_custom:
+
+            prompt_parts.append(
+                f"تعليمات النظام الخاصة بالشخصية: "
+                f"{system_prompt_custom}"
+            )
+
         if mode_name == "friendly":
 
             prompt_parts.append(
@@ -394,8 +457,11 @@ class AIEngine:
             )
 
         if advanced.get(
-            "security",
-            True,
+            "security_enabled",
+            advanced.get(
+                "security",
+                True
+            )
         ):
 
             prompt_parts.append(
@@ -547,6 +613,12 @@ class AIEngine:
                             )
                         )
 
+                        print(
+                            "[Gemini] HTTP "
+                            f"{response.status}: "
+                            f"{error_text[:1500]}"
+                        )
+
                         raise RuntimeError(
                             "Google API error "
                             f"{response.status}: "
@@ -622,8 +694,17 @@ class AIEngine:
 
         if not result:
 
+            finish_reason = candidates[0].get(
+                "finishReason"
+            )
+
             raise RuntimeError(
                 "Google returned an empty response."
+                + (
+                    f" finishReason={finish_reason}"
+                    if finish_reason
+                    else ""
+                )
             )
 
         return result
@@ -726,6 +807,12 @@ class AIEngine:
                             await self._read_error(
                                 response
                             )
+                        )
+
+                        print(
+                            "[OpenAI] HTTP "
+                            f"{response.status}: "
+                            f"{error_text[:1500]}"
                         )
 
                         raise RuntimeError(
@@ -894,6 +981,12 @@ class AIEngine:
                             await self._read_error(
                                 response
                             )
+                        )
+
+                        print(
+                            "[Anthropic] HTTP "
+                            f"{response.status}: "
+                            f"{error_text[:1500]}"
                         )
 
                         raise RuntimeError(
@@ -1155,22 +1248,332 @@ class AIEngine:
         )
 
     # ========================================================
+    # CHARACTER RESOLUTION
+    # ========================================================
+
+    def resolve_character(
+        self,
+        guild_id: Optional[int],
+        user_id: Optional[int],
+        character: Optional[Dict[str, Any]] = None,
+        character_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+
+        # ----------------------------------------------------
+        # EXPLICIT CHARACTER
+        # ----------------------------------------------------
+
+        if character is not None:
+
+            resolved = self.row_to_dict(
+                character
+            )
+
+            if resolved:
+                return resolved
+
+        # ----------------------------------------------------
+        # DM
+        # ----------------------------------------------------
+
+        if guild_id == 0:
+
+            if user_id is not None:
+
+                try:
+
+                    dm_character = (
+                        self.db.get_active_dm_character(
+                            user_id
+                        )
+                    )
+
+                    if dm_character:
+
+                        return self.row_to_dict(
+                            dm_character
+                        )
+
+                except Exception as exc:
+
+                    print(
+                        "[AI] DM character lookup failed: "
+                        f"{exc}"
+                    )
+
+            return {
+                "name": (
+                    character_name
+                    or "مساعد MyAI"
+                ),
+                "type": "normal",
+                "character_type": "normal",
+                "description": "",
+                "personality": "",
+                "speaking_style": "",
+                "custom_instructions": "",
+                "system_prompt": "",
+                "provider": "",
+                "model": "",
+            }
+
+        # ----------------------------------------------------
+        # GUILD USER CHARACTER
+        # ----------------------------------------------------
+
+        if user_id is not None and guild_id is not None:
+
+            try:
+
+                user_character = (
+                    self.db.get_user_active_character(
+                        guild_id,
+                        user_id
+                    )
+                )
+
+                if user_character:
+
+                    return self.row_to_dict(
+                        user_character
+                    )
+
+            except Exception as exc:
+
+                print(
+                    "[AI] User character lookup failed: "
+                    f"{exc}"
+                )
+
+        # ----------------------------------------------------
+        # GUILD DEFAULT CHARACTER
+        # ----------------------------------------------------
+
+        if guild_id is not None:
+
+            try:
+
+                guild_character = (
+                    self.db.get_active_character(
+                        guild_id
+                    )
+                )
+
+                if guild_character:
+
+                    return self.row_to_dict(
+                        guild_character
+                    )
+
+            except Exception as exc:
+
+                print(
+                    "[AI] Guild character lookup failed: "
+                    f"{exc}"
+                )
+
+        # ----------------------------------------------------
+        # FALLBACK
+        # ----------------------------------------------------
+
+        return {
+            "name": (
+                character_name
+                or "مساعد MyAI"
+            ),
+            "type": "normal",
+            "character_type": "normal",
+            "description": "",
+            "personality": "",
+            "speaking_style": "",
+            "custom_instructions": "",
+            "system_prompt": "",
+            "provider": "",
+            "model": "",
+        }
+
+    # ========================================================
+    # HISTORY
+    # ========================================================
+
+    def load_history(
+        self,
+        guild_id: Optional[int],
+        channel_id: Optional[int],
+        user_id: Optional[int],
+        history_limit: int,
+    ):
+
+        history = []
+
+        if (
+            user_id is None
+            or history_limit <= 0
+        ):
+
+            return history
+
+        try:
+
+            # ------------------------------------------------
+            # DM HISTORY
+            # ------------------------------------------------
+
+            if guild_id == 0:
+
+                history = (
+                    self.db.get_dm_history(
+                        user_id=user_id,
+                        limit=history_limit,
+                    )
+                    or []
+                )
+
+            # ------------------------------------------------
+            # GUILD HISTORY
+            # ------------------------------------------------
+
+            elif guild_id is not None:
+
+                if channel_id is None:
+
+                    return history
+
+                history = (
+                    self.db.get_history(
+                        guild_id=guild_id,
+                        channel_id=channel_id,
+                        user_id=user_id,
+                        limit=history_limit,
+                    )
+                    or []
+                )
+
+        except TypeError:
+
+            # Compatibility fallback for older DB signatures.
+
+            try:
+
+                if guild_id == 0:
+
+                    history = (
+                        self.db.get_dm_history(
+                            user_id,
+                            history_limit,
+                        )
+                        or []
+                    )
+
+                elif guild_id is not None:
+
+                    history = (
+                        self.db.get_history(
+                            guild_id,
+                            channel_id,
+                            user_id,
+                            history_limit,
+                        )
+                        or []
+                    )
+
+            except Exception as exc:
+
+                print(
+                    "[AI] History lookup failed: "
+                    f"{exc}"
+                )
+
+        except Exception as exc:
+
+            print(
+                "[AI] History lookup failed: "
+                f"{exc}"
+            )
+
+        return history
+
+    # ========================================================
+    # MEMORY SAVE
+    # ========================================================
+
+    def save_dm_memory(
+        self,
+        user_id: int,
+        prompt: str,
+        result: str,
+        character_name: Optional[str] = None,
+    ):
+
+        if not user_id:
+            return
+
+        try:
+
+            self.db.add_message(
+                guild_id=0,
+                channel_id=0,
+                user_id=user_id,
+                character_name=character_name,
+                role="user",
+                content=prompt,
+            )
+
+            self.db.add_message(
+                guild_id=0,
+                channel_id=0,
+                user_id=user_id,
+                character_name=character_name,
+                role="assistant",
+                content=result,
+            )
+
+            return
+
+        except TypeError:
+
+            pass
+
+        except Exception as exc:
+
+            print(
+                "[AI] DM memory save failed: "
+                f"{exc}"
+            )
+
+            return
+
+        # Compatibility with older signatures.
+
+        try:
+
+            self.db.add_message(
+                0,
+                0,
+                user_id,
+                character_name,
+                "user",
+                prompt,
+            )
+
+            self.db.add_message(
+                0,
+                0,
+                user_id,
+                character_name,
+                "assistant",
+                result,
+            )
+
+        except Exception as exc:
+
+            print(
+                "[AI] DM memory compatibility save failed: "
+                f"{exc}"
+            )
+
+    # ========================================================
     # GENERATE
-    #
-    # Compatible with main.py:
-    #
-    # guild_id
-    # channel_id
-    # user_id
-    # prompt
-    # character
-    # mode
-    # provider
-    # model
-    # history_limit
-    # max_tokens_override
-    #
-    # **kwargs protects against future optional arguments.
     # ========================================================
 
     async def generate(
@@ -1200,7 +1603,7 @@ class AIEngine:
             )
 
         # ----------------------------------------------------
-        # EXTRA ARGUMENT PROTECTION
+        # EXTRA ARGUMENTS
         # ----------------------------------------------------
 
         if kwargs:
@@ -1218,69 +1621,12 @@ class AIEngine:
         # CHARACTER
         # ----------------------------------------------------
 
-        if character is not None:
-
-            character = self.row_to_dict(
-                character
-            )
-
-        # If main.py already supplied the character,
-        # DO NOT replace it with another character.
-
-        if not character:
-
-            try:
-
-                if user_id is not None:
-
-                    character = (
-                        self.db.get_user_active_character(
-                            user_id,
-                            guild_id,
-                        )
-                    )
-
-            except Exception as exc:
-
-                print(
-                    "[AI] User character lookup failed: "
-                    f"{exc}"
-                )
-
-        if not character and guild_id is not None:
-
-            try:
-
-                character = (
-                    self.db.get_active_character(
-                        guild_id
-                    )
-                )
-
-            except Exception as exc:
-
-                print(
-                    "[AI] Guild character lookup failed: "
-                    f"{exc}"
-                )
-
-        if character:
-
-            character = self.row_to_dict(
-                character
-            )
-
-        if not character:
-
-            character = {
-                "name": (
-                    character_name
-                    or "مساعد MyAI"
-                ),
-                "type": "normal",
-                "description": "",
-                "personality": "",
-            }
+        character = self.resolve_character(
+            guild_id=guild_id,
+            user_id=user_id,
+            character=character,
+            character_name=character_name,
+        )
 
         # ----------------------------------------------------
         # MODE
@@ -1288,38 +1634,70 @@ class AIEngine:
 
         if not mode:
 
-            try:
+            # DM settings are completely separate from
+            # guild settings.
 
-                if guild_id is not None:
+            if guild_id == 0 and user_id is not None:
 
-                    config = (
-                        self.db.get_ai_config(
-                            guild_id
+                try:
+
+                    dm_settings = (
+                        self.db.get_dm_settings(
+                            user_id
                         )
-                        or {}
                     )
 
-                else:
+                    mode = dm_settings.get(
+                        "mode",
+                        "normal"
+                    )
 
-                    config = {}
+                except Exception as exc:
 
-                mode = config.get(
-                    "mode",
-                    "normal",
-                )
+                    print(
+                        "[AI] DM mode lookup failed: "
+                        f"{exc}"
+                    )
 
-            except Exception as exc:
+                    mode = "normal"
 
-                print(
-                    "[AI] Mode lookup failed: "
-                    f"{exc}"
-                )
+            else:
 
-                mode = "normal"
+                try:
 
-        mode_name = _clean_text(
-            mode
-        ).lower() or "normal"
+                    if guild_id is not None:
+
+                        config = (
+                            self.db.get_ai_config(
+                                guild_id
+                            )
+                            or {}
+                        )
+
+                    else:
+
+                        config = {}
+
+                    mode = config.get(
+                        "mode",
+                        "normal",
+                    )
+
+                except Exception as exc:
+
+                    print(
+                        "[AI] Mode lookup failed: "
+                        f"{exc}"
+                    )
+
+                    mode = "normal"
+
+        mode_name = (
+            _clean_text(
+                mode
+            ).lower()
+            or "normal"
+        )
 
         mode_config = self.get_mode(
             mode_name
@@ -1331,7 +1709,7 @@ class AIEngine:
 
         advanced = {}
 
-        if guild_id is not None:
+        if guild_id is not None and guild_id != 0:
 
             try:
 
@@ -1348,6 +1726,37 @@ class AIEngine:
                     "[AI] Advanced settings lookup failed: "
                     f"{exc}"
                 )
+
+        # ----------------------------------------------------
+        # DM SETTINGS
+        # ----------------------------------------------------
+
+        dm_settings = {}
+
+        if guild_id == 0 and user_id is not None:
+
+            try:
+
+                dm_settings = (
+                    self.db.get_dm_settings(
+                        user_id
+                    )
+                    or {}
+                )
+
+            except Exception as exc:
+
+                print(
+                    "[AI] DM settings lookup failed: "
+                    f"{exc}"
+                )
+
+                dm_settings = {}
+
+            advanced = {
+                "memory_enabled": True,
+                "security_enabled": True,
+            }
 
         # ----------------------------------------------------
         # PROVIDER
@@ -1373,7 +1782,17 @@ class AIEngine:
 
         if not selected_provider:
 
-            selected_provider = DEFAULT_PROVIDER
+            if guild_id == 0:
+
+                selected_provider = (
+                    DEFAULT_PROVIDER
+                )
+
+            else:
+
+                selected_provider = (
+                    DEFAULT_PROVIDER
+                )
 
         # ----------------------------------------------------
         # MODEL
@@ -1395,18 +1814,30 @@ class AIEngine:
         )
 
         # ----------------------------------------------------
-        # HISTORY
+        # HISTORY LIMIT
         # ----------------------------------------------------
 
         if history_limit is None:
 
-            history_limit = _safe_int(
-                advanced.get(
-                    "history",
+            if guild_id == 0:
+
+                history_limit = _safe_int(
+                    dm_settings.get(
+                        "history_limit",
+                        20,
+                    ),
                     20,
-                ),
-                20,
-            )
+                )
+
+            else:
+
+                history_limit = _safe_int(
+                    advanced.get(
+                        "history_limit",
+                        20,
+                    ),
+                    20,
+                )
 
         else:
 
@@ -1415,59 +1846,81 @@ class AIEngine:
                 20,
             )
 
-        if history_limit < 0:
+        history_limit = max(
+            0,
+            min(
+                100,
+                history_limit
+            )
+        )
 
-            history_limit = 0
+        # ----------------------------------------------------
+        # RESPONSE LENGTH
+        # ----------------------------------------------------
 
-        if history_limit > 100:
+        if max_tokens_override is not None:
 
-            history_limit = 100
+            effective_max_tokens = _safe_int(
+                max_tokens_override,
+                1200,
+            )
 
-        history = []
+        else:
 
-        if (
-            guild_id is not None
-            and user_id is not None
-            and history_limit > 0
-        ):
+            if guild_id == 0:
 
-            try:
-
-                history = (
-                    self.db.get_history(
-                        guild_id=guild_id,
-                        user_id=user_id,
-                        limit=history_limit,
-                    )
-                    or []
-                )
-
-            except TypeError:
-
-                try:
-
-                    history = (
-                        self.db.get_history(
-                            guild_id,
-                            user_id,
-                            history_limit,
+                effective_max_tokens = _safe_int(
+                    dm_settings.get(
+                        "response_length",
+                        mode_config.get(
+                            "max_tokens",
+                            1200
                         )
-                        or []
-                    )
-
-                except Exception as exc:
-
-                    print(
-                        "[AI] History lookup failed: "
-                        f"{exc}"
-                    )
-
-            except Exception as exc:
-
-                print(
-                    "[AI] History lookup failed: "
-                    f"{exc}"
+                    ),
+                    1200,
                 )
+
+            else:
+
+                effective_max_tokens = _safe_int(
+                    mode_config.get(
+                        "max_tokens",
+                        1200,
+                    ),
+                    1200,
+                )
+
+                # Server setting has priority.
+
+                if advanced.get(
+                    "response_length"
+                ) is not None:
+
+                    effective_max_tokens = _safe_int(
+                        advanced.get(
+                            "response_length"
+                        ),
+                        effective_max_tokens
+                    )
+
+        effective_max_tokens = max(
+            1,
+            min(
+                4000,
+                effective_max_tokens
+            )
+        )
+
+        # ----------------------------------------------------
+        # HISTORY
+        # ----------------------------------------------------
+
+        history = self.load_history(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=user_id,
+            history_limit=history_limit,
+        )
 
         # ----------------------------------------------------
         # BUILD MESSAGES
@@ -1527,33 +1980,21 @@ class AIEngine:
         )
 
         # ----------------------------------------------------
-        # TOKEN LIMIT
-        # ----------------------------------------------------
-
-        if max_tokens_override is not None:
-
-            effective_max_tokens = _safe_int(
-                max_tokens_override,
-                1200,
-            )
-
-        else:
-
-            effective_max_tokens = _safe_int(
-                mode_config.get(
-                    "max_tokens",
-                    1200,
-                ),
-                1200,
-            )
-
-        if effective_max_tokens < 1:
-
-            effective_max_tokens = 1
-
-        # ----------------------------------------------------
         # GENERATION LOG
         # ----------------------------------------------------
+
+        character_display_name = (
+            _clean_text(
+                character.get("name")
+            )
+            or "MyAI"
+        )
+
+        location = (
+            "DM"
+            if guild_id == 0
+            else f"guild={guild_id}"
+        )
 
         print(
             "[AI] ========================================"
@@ -1561,6 +2002,24 @@ class AIEngine:
 
         print(
             "[AI] Generation request"
+        )
+
+        print(
+            f"[AI] location={location}"
+        )
+
+        print(
+            f"[AI] user_id={user_id}"
+        )
+
+        if channel_id is not None:
+
+            print(
+                f"[AI] channel_id={channel_id}"
+            )
+
+        print(
+            f"[AI] character={character_display_name}"
         )
 
         print(
@@ -1578,12 +2037,6 @@ class AIEngine:
         print(
             f"[AI] history_limit={history_limit}"
         )
-
-        if channel_id is not None:
-
-            print(
-                f"[AI] channel_id={channel_id}"
-            )
 
         print(
             f"[AI] max_tokens={effective_max_tokens}"
@@ -1627,7 +2080,11 @@ class AIEngine:
             )
 
             print(
-                f"[AI] {exc}"
+                f"[AI] type={type(exc).__name__}"
+            )
+
+            print(
+                f"[AI] error={exc}"
             )
 
             print(
@@ -1647,75 +2104,42 @@ class AIEngine:
             )
 
         # ----------------------------------------------------
-        # MEMORY
-        #
-        # IMPORTANT:
-        # main.py already saves guild messages through
-        # on_message. To avoid duplicating guild history,
-        # only AIEngine handles memory for DM-style calls
-        # where guild_id == 0.
-        #
-        # For guild calls, main.py remains the source that
-        # records the Discord messages.
+        # SAVE DM MEMORY
         # ----------------------------------------------------
 
-        memory_enabled = advanced.get(
-            "memory",
-            True,
-        )
+        if guild_id == 0 and user_id is not None:
 
-        if (
-            memory_enabled
-            and guild_id == 0
-            and user_id is not None
-        ):
+            dm_memory_enabled = (
+                dm_settings.get(
+                    "memory_enabled",
+                    True
+                )
+            )
 
-            try:
+            if isinstance(
+                dm_memory_enabled,
+                str
+            ):
 
-                self.db.add_message(
-                    guild_id=0,
-                    user_id=user_id,
-                    role="user",
-                    content=prompt,
+                dm_memory_enabled = (
+                    dm_memory_enabled.lower()
+                    not in {
+                        "0",
+                        "false",
+                        "off",
+                        "disabled",
+                    }
                 )
 
-                self.db.add_message(
-                    guild_id=0,
+            if dm_memory_enabled:
+
+                self.save_dm_memory(
                     user_id=user_id,
-                    role="assistant",
-                    content=result,
-                )
-
-            except TypeError:
-
-                try:
-
-                    self.db.add_message(
-                        0,
-                        user_id,
-                        "user",
-                        prompt,
-                    )
-
-                    self.db.add_message(
-                        0,
-                        user_id,
-                        "assistant",
-                        result,
-                    )
-
-                except Exception as exc:
-
-                    print(
-                        "[AI] DM memory save failed: "
-                        f"{exc}"
-                    )
-
-            except Exception as exc:
-
-                print(
-                    "[AI] DM memory save failed: "
-                    f"{exc}"
+                    prompt=prompt,
+                    result=result,
+                    character_name=(
+                        character_display_name
+                    ),
                 )
 
         return result
