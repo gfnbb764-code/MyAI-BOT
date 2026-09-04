@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import asyncio
 from typing import Optional, Dict, Any
 
 import aiohttp
@@ -133,7 +134,9 @@ def _clean_text(value: Any) -> str:
 # ============================================================
 
 class AIEngine:
+
     def __init__(self, db):
+
         self.db = db
 
         self.google_key = os.getenv(
@@ -168,15 +171,19 @@ class AIEngine:
         )
 
         self.timeout = _safe_int(
-            os.getenv("AI_REQUEST_TIMEOUT", "90"),
+            os.getenv(
+                "AI_REQUEST_TIMEOUT",
+                "90",
+            ),
             90,
         )
 
     # ========================================================
-    # KEY RELOAD
+    # RELOAD API KEYS
     # ========================================================
 
     def reload_keys(self):
+
         self.google_key = os.getenv(
             "GOOGLE_API_KEY",
             "",
@@ -196,10 +203,14 @@ class AIEngine:
         ).strip()
 
     # ========================================================
-    # DATABASE HELPERS
+    # ROW TO DICT
     # ========================================================
 
-    def row_to_dict(self, row) -> Dict[str, Any]:
+    def row_to_dict(
+        self,
+        row,
+    ) -> Dict[str, Any]:
+
         if row is None:
             return {}
 
@@ -215,8 +226,14 @@ class AIEngine:
     # MODE
     # ========================================================
 
-    def get_mode(self, name: Optional[str]) -> Dict[str, Any]:
-        name = _clean_text(name).lower()
+    def get_mode(
+        self,
+        name: Optional[str],
+    ) -> Dict[str, Any]:
+
+        name = _clean_text(
+            name
+        ).lower()
 
         if name not in AI_MODES:
             name = "normal"
@@ -227,8 +244,14 @@ class AIEngine:
     # REPLY TYPE
     # ========================================================
 
-    def get_reply_type(self, value: Optional[str]) -> str:
-        value = _clean_text(value).lower()
+    def get_reply_type(
+        self,
+        value: Optional[str],
+    ) -> str:
+
+        value = _clean_text(
+            value
+        ).lower()
 
         if value not in REPLY_TYPES:
             return "mention"
@@ -245,25 +268,43 @@ class AIEngine:
         model: Optional[str] = None,
     ) -> str:
 
-        provider = _clean_text(provider).lower()
-        model = _clean_text(model)
+        provider = _clean_text(
+            provider
+        ).lower()
+
+        model = _clean_text(
+            model
+        )
 
         if provider == "google":
-            model = model or GOOGLE_DEFAULT_MODEL
+
+            model = (
+                model
+                or GOOGLE_DEFAULT_MODEL
+            )
 
         elif provider == "openai":
-            model = model or OPENAI_DEFAULT_MODEL
+
+            model = (
+                model
+                or OPENAI_DEFAULT_MODEL
+            )
 
         elif provider == "anthropic":
-            model = model or ANTHROPIC_DEFAULT_MODEL
+
+            model = (
+                model
+                or ANTHROPIC_DEFAULT_MODEL
+            )
 
         if model in MODEL_ALIASES:
+
             model = MODEL_ALIASES[model]
 
         return model
 
     # ========================================================
-    # CHARACTER DESCRIPTION
+    # CHARACTER TYPE
     # ========================================================
 
     def get_character_type_description(
@@ -329,44 +370,56 @@ class AIEngine:
         ]
 
         if description:
+
             prompt_parts.append(
                 f"وصف الشخصية: {description}"
             )
 
         if personality:
+
             prompt_parts.append(
                 f"شخصية المساعد: {personality}"
             )
 
         if mode_name == "friendly":
+
             prompt_parts.append(
                 "كن ودودًا ولطيفًا أثناء التفاعل."
             )
 
         elif mode_name == "active":
+
             prompt_parts.append(
                 "كن متفاعلًا ونشيطًا في المحادثة."
             )
 
         elif mode_name == "fun":
+
             prompt_parts.append(
                 "يمكنك استخدام المزاح الخفيف والمناسب."
             )
 
         elif mode_name == "professional":
+
             prompt_parts.append(
                 "كن احترافيًا ودقيقًا ومباشرًا."
             )
 
-        if advanced.get("security", True):
+        if advanced.get(
+            "security",
+            True,
+        ):
+
             prompt_parts.append(
                 "تجنب المحتوى الخطير أو غير المناسب."
             )
 
-        return "\n".join(prompt_parts)
+        return "\n".join(
+            prompt_parts
+        )
 
     # ========================================================
-    # HTTP ERROR
+    # READ HTTP ERROR
     # ========================================================
 
     async def _read_error(
@@ -375,14 +428,19 @@ class AIEngine:
     ) -> str:
 
         try:
+
             text = await response.text()
 
             if not text:
-                return f"HTTP {response.status}"
+
+                return (
+                    f"HTTP {response.status}"
+                )
 
             return text[:3000]
 
         except Exception as exc:
+
             return (
                 f"HTTP {response.status}; "
                 f"failed to read response: {exc}"
@@ -404,6 +462,7 @@ class AIEngine:
         self.reload_keys()
 
         if not self.google_key:
+
             raise RuntimeError(
                 "Google/Gemini API key is missing."
             )
@@ -420,7 +479,12 @@ class AIEngine:
         contents = []
 
         for message in messages:
-            role = message.get("role", "user")
+
+            role = message.get(
+                "role",
+                "user",
+            )
+
             text = _clean_text(
                 message.get("content")
             )
@@ -429,8 +493,11 @@ class AIEngine:
                 continue
 
             if role == "assistant":
+
                 gemini_role = "model"
+
             else:
+
                 gemini_role = "user"
 
             contents.append(
@@ -469,6 +536,7 @@ class AIEngine:
         )
 
         try:
+
             async with aiohttp.ClientSession(
                 timeout=timeout
             ) as session:
@@ -480,12 +548,15 @@ class AIEngine:
                 ) as response:
 
                     if response.status >= 400:
-                        error_text = await self._read_error(
-                            response
+
+                        error_text = (
+                            await self._read_error(
+                                response
+                            )
                         )
 
                         raise RuntimeError(
-                            f"Google API error "
+                            "Google API error "
                             f"{response.status}: "
                             f"{error_text}"
                         )
@@ -493,11 +564,13 @@ class AIEngine:
                     data = await response.json()
 
         except asyncio.TimeoutError:
+
             raise RuntimeError(
                 "Google API request timed out."
             )
 
         except aiohttp.ClientError as exc:
+
             raise RuntimeError(
                 f"Google network error: {exc}"
             )
@@ -508,14 +581,19 @@ class AIEngine:
         )
 
         if not candidates:
+
             feedback = data.get(
                 "promptFeedback"
             )
 
             if feedback:
+
                 raise RuntimeError(
                     "Google returned no candidates: "
-                    f"{json.dumps(feedback, ensure_ascii=False)}"
+                    + json.dumps(
+                        feedback,
+                        ensure_ascii=False,
+                    )
                 )
 
             raise RuntimeError(
@@ -535,16 +613,23 @@ class AIEngine:
         texts = []
 
         for part in parts:
-            text = part.get("text")
+
+            text = part.get(
+                "text"
+            )
 
             if text:
+
                 texts.append(
                     str(text)
                 )
 
-        result = "".join(texts).strip()
+        result = "".join(
+            texts
+        ).strip()
 
         if not result:
+
             raise RuntimeError(
                 "Google returned an empty response."
             )
@@ -567,6 +652,7 @@ class AIEngine:
         self.reload_keys()
 
         if not self.openai_key:
+
             raise RuntimeError(
                 "OpenAI API key is missing."
             )
@@ -579,6 +665,7 @@ class AIEngine:
         input_messages = []
 
         for message in messages:
+
             role = message.get(
                 "role",
                 "user",
@@ -618,6 +705,7 @@ class AIEngine:
         )
 
         try:
+
             async with aiohttp.ClientSession(
                 timeout=timeout
             ) as session:
@@ -629,12 +717,15 @@ class AIEngine:
                 ) as response:
 
                     if response.status >= 400:
-                        error_text = await self._read_error(
-                            response
+
+                        error_text = (
+                            await self._read_error(
+                                response
+                            )
                         )
 
                         raise RuntimeError(
-                            f"OpenAI API error "
+                            "OpenAI API error "
                             f"{response.status}: "
                             f"{error_text}"
                         )
@@ -642,11 +733,13 @@ class AIEngine:
                     data = await response.json()
 
         except asyncio.TimeoutError:
+
             raise RuntimeError(
                 "OpenAI API request timed out."
             )
 
         except aiohttp.ClientError as exc:
+
             raise RuntimeError(
                 f"OpenAI network error: {exc}"
             )
@@ -656,6 +749,7 @@ class AIEngine:
         )
 
         if output_text:
+
             return str(
                 output_text
             ).strip()
@@ -668,22 +762,28 @@ class AIEngine:
         texts = []
 
         for output in outputs:
+
             for content in output.get(
                 "content",
                 []
             ):
+
                 text = content.get(
                     "text"
                 )
 
                 if text:
+
                     texts.append(
                         str(text)
                     )
 
-        result = "".join(texts).strip()
+        result = "".join(
+            texts
+        ).strip()
 
         if not result:
+
             raise RuntimeError(
                 "OpenAI returned an empty response."
             )
@@ -706,6 +806,7 @@ class AIEngine:
         self.reload_keys()
 
         if not self.anthropic_key:
+
             raise RuntimeError(
                 "Anthropic API key is missing."
             )
@@ -718,6 +819,7 @@ class AIEngine:
         anthropic_messages = []
 
         for message in messages:
+
             role = message.get(
                 "role",
                 "user",
@@ -762,6 +864,7 @@ class AIEngine:
         )
 
         try:
+
             async with aiohttp.ClientSession(
                 timeout=timeout
             ) as session:
@@ -773,12 +876,15 @@ class AIEngine:
                 ) as response:
 
                     if response.status >= 400:
-                        error_text = await self._read_error(
-                            response
+
+                        error_text = (
+                            await self._read_error(
+                                response
+                            )
                         )
 
                         raise RuntimeError(
-                            f"Anthropic API error "
+                            "Anthropic API error "
                             f"{response.status}: "
                             f"{error_text}"
                         )
@@ -786,11 +892,13 @@ class AIEngine:
                     data = await response.json()
 
         except asyncio.TimeoutError:
+
             raise RuntimeError(
                 "Anthropic API request timed out."
             )
 
         except aiohttp.ClientError as exc:
+
             raise RuntimeError(
                 f"Anthropic network error: {exc}"
             )
@@ -803,17 +911,25 @@ class AIEngine:
         texts = []
 
         for item in content:
+
             if item.get("type") == "text":
-                text = item.get("text")
+
+                text = item.get(
+                    "text"
+                )
 
                 if text:
+
                     texts.append(
                         str(text)
                     )
 
-        result = "".join(texts).strip()
+        result = "".join(
+            texts
+        ).strip()
 
         if not result:
+
             raise RuntimeError(
                 "Anthropic returned an empty response."
             )
@@ -839,6 +955,7 @@ class AIEngine:
         ).lower()
 
         if provider == "google":
+
             return await self._google(
                 messages=messages,
                 system_prompt=system_prompt,
@@ -848,6 +965,7 @@ class AIEngine:
             )
 
         if provider == "openai":
+
             return await self._openai(
                 messages=messages,
                 system_prompt=system_prompt,
@@ -857,6 +975,7 @@ class AIEngine:
             )
 
         if provider == "anthropic":
+
             return await self._anthropic(
                 messages=messages,
                 system_prompt=system_prompt,
@@ -890,11 +1009,13 @@ class AIEngine:
         ).lower()
 
         if not primary_provider:
-            primary_provider = DEFAULT_PROVIDER
+
+            primary_provider = (
+                DEFAULT_PROVIDER
+            )
 
         attempts = []
 
-        # Primary provider first.
         primary_model = self.resolve_model(
             primary_provider,
             primary_model,
@@ -907,7 +1028,6 @@ class AIEngine:
             )
         )
 
-        # Then fallback providers.
         fallback_defaults = {
             "google": GOOGLE_DEFAULT_MODEL,
             "openai": OPENAI_DEFAULT_MODEL,
@@ -939,34 +1059,44 @@ class AIEngine:
 
         for provider, model in attempts:
 
-            # Check the currently loaded key.
             if provider == "google":
+
                 if not self.google_key:
+
                     errors.append(
-                        f"{provider}: API key missing"
+                        "google: API key missing"
                     )
+
                     continue
 
             elif provider == "openai":
+
                 if not self.openai_key:
+
                     errors.append(
-                        f"{provider}: API key missing"
+                        "openai: API key missing"
                     )
+
                     continue
 
             elif provider == "anthropic":
+
                 if not self.anthropic_key:
+
                     errors.append(
-                        f"{provider}: API key missing"
+                        "anthropic: API key missing"
                     )
+
                     continue
 
             print(
-                f"[AI] Trying provider={provider} "
+                "[AI] Trying provider="
+                f"{provider} "
                 f"model={model}"
             )
 
             try:
+
                 result = await self.request(
                     provider=provider,
                     model=model,
@@ -977,8 +1107,8 @@ class AIEngine:
                 )
 
                 print(
-                    f"[AI] Success: "
-                    f"provider={provider} "
+                    "[AI] Success: provider="
+                    f"{provider} "
                     f"model={model}"
                 )
 
@@ -986,11 +1116,13 @@ class AIEngine:
 
             except Exception as exc:
 
-                error_text = str(exc)
+                error_text = str(
+                    exc
+                )
 
                 print(
-                    f"[AI] FAILED: "
-                    f"provider={provider} "
+                    "[AI] FAILED: provider="
+                    f"{provider} "
                     f"model={model}"
                 )
 
@@ -1026,11 +1158,16 @@ class AIEngine:
         provider: Optional[str] = None,
         model: Optional[str] = None,
         character_name: Optional[str] = None,
+        channel_id: Optional[int] = None,
+        max_tokens_override: Optional[int] = None,
     ) -> str:
 
-        prompt = _clean_text(prompt)
+        prompt = _clean_text(
+            prompt
+        )
 
         if not prompt:
+
             raise RuntimeError(
                 "Empty prompt."
             )
@@ -1042,33 +1179,42 @@ class AIEngine:
         character = None
 
         try:
+
             if user_id is not None:
+
                 character = (
                     self.db.get_user_active_character(
                         user_id,
                         guild_id,
                     )
                 )
+
         except Exception as exc:
+
             print(
-                f"[AI] User character lookup failed: "
+                "[AI] User character lookup failed: "
                 f"{exc}"
             )
 
         if not character and guild_id is not None:
+
             try:
+
                 character = (
                     self.db.get_active_character(
                         guild_id
                     )
                 )
+
             except Exception as exc:
+
                 print(
-                    f"[AI] Guild character lookup failed: "
+                    "[AI] Guild character lookup failed: "
                     f"{exc}"
                 )
 
         if not character:
+
             character = {
                 "name": (
                     character_name
@@ -1084,16 +1230,29 @@ class AIEngine:
         # ----------------------------------------------------
 
         if not mode:
+
             try:
-                config = self.db.get_ai_config(
-                    guild_id
-                ) if guild_id is not None else {}
+
+                if guild_id is not None:
+
+                    config = (
+                        self.db.get_ai_config(
+                            guild_id
+                        )
+                        or {}
+                    )
+
+                else:
+
+                    config = {}
 
                 mode = config.get(
                     "mode",
                     "normal",
                 )
+
             except Exception:
+
                 mode = "normal"
 
         mode_name = _clean_text(
@@ -1111,16 +1270,20 @@ class AIEngine:
         advanced = {}
 
         if guild_id is not None:
+
             try:
+
                 advanced = (
                     self.db.get_ai_advanced_settings(
                         guild_id
                     )
                     or {}
                 )
+
             except Exception as exc:
+
                 print(
-                    f"[AI] Advanced settings lookup failed: "
+                    "[AI] Advanced settings lookup failed: "
                     f"{exc}"
                 )
 
@@ -1129,18 +1292,28 @@ class AIEngine:
         # ----------------------------------------------------
 
         selected_provider = (
-            _clean_text(provider).lower()
+            _clean_text(
+                provider
+            ).lower()
             if provider
             else ""
         )
 
         if not selected_provider:
-            selected_provider = _clean_text(
-                character.get("provider")
-            ).lower()
+
+            selected_provider = (
+                _clean_text(
+                    character.get(
+                        "provider"
+                    )
+                ).lower()
+            )
 
         if not selected_provider:
-            selected_provider = DEFAULT_PROVIDER
+
+            selected_provider = (
+                DEFAULT_PROVIDER
+            )
 
         # ----------------------------------------------------
         # MODEL
@@ -1150,7 +1323,9 @@ class AIEngine:
             _clean_text(model)
             if model
             else _clean_text(
-                character.get("model")
+                character.get(
+                    "model"
+                )
             )
         )
 
@@ -1172,9 +1347,11 @@ class AIEngine:
         )
 
         if history_limit < 0:
+
             history_limit = 0
 
         if history_limit > 100:
+
             history_limit = 100
 
         history = []
@@ -1184,7 +1361,9 @@ class AIEngine:
             and user_id is not None
             and history_limit > 0
         ):
+
             try:
+
                 history = (
                     self.db.get_history(
                         guild_id=guild_id,
@@ -1193,9 +1372,11 @@ class AIEngine:
                     )
                     or []
                 )
+
             except TypeError:
-                # Compatibility with older Database versions.
+
                 try:
+
                     history = (
                         self.db.get_history(
                             guild_id,
@@ -1204,15 +1385,18 @@ class AIEngine:
                         )
                         or []
                     )
+
                 except Exception as exc:
+
                     print(
-                        f"[AI] History lookup failed: "
+                        "[AI] History lookup failed: "
                         f"{exc}"
                     )
 
             except Exception as exc:
+
                 print(
-                    f"[AI] History lookup failed: "
+                    "[AI] History lookup failed: "
                     f"{exc}"
                 )
 
@@ -1223,7 +1407,10 @@ class AIEngine:
         messages = []
 
         for item in history:
-            row = self.row_to_dict(item)
+
+            row = self.row_to_dict(
+                item
+            )
 
             role = _clean_text(
                 row.get("role")
@@ -1262,18 +1449,49 @@ class AIEngine:
         # SYSTEM PROMPT
         # ----------------------------------------------------
 
-        system_prompt = self.build_system_prompt(
-            character=character,
-            mode=mode_name,
-            advanced=advanced,
+        system_prompt = (
+            self.build_system_prompt(
+                character=character,
+                mode=mode_name,
+                advanced=advanced,
+            )
         )
 
         # ----------------------------------------------------
-        # GENERATE
+        # TOKEN LIMIT
+        # ----------------------------------------------------
+
+        if max_tokens_override is not None:
+
+            effective_max_tokens = _safe_int(
+                max_tokens_override,
+                1200,
+            )
+
+        else:
+
+            effective_max_tokens = _safe_int(
+                mode_config.get(
+                    "max_tokens",
+                    1200,
+                ),
+                1200,
+            )
+
+        if effective_max_tokens < 1:
+
+            effective_max_tokens = 1
+
+        # ----------------------------------------------------
+        # GENERATION LOG
         # ----------------------------------------------------
 
         print(
-            "[AI] Generation request:"
+            "[AI] ========================================"
+        )
+
+        print(
+            "[AI] Generation request"
         )
 
         print(
@@ -1288,26 +1506,41 @@ class AIEngine:
             f"[AI] mode={mode_name}"
         )
 
+        if channel_id is not None:
+
+            print(
+                f"[AI] channel_id={channel_id}"
+            )
+
+        print(
+            f"[AI] max_tokens={effective_max_tokens}"
+        )
+
+        print(
+            "[AI] ========================================"
+        )
+
+        # ----------------------------------------------------
+        # CALL PROVIDER
+        # ----------------------------------------------------
+
         try:
-            result = await self.request_with_fallback(
-                primary_provider=selected_provider,
-                primary_model=selected_model,
-                messages=messages,
-                system_prompt=system_prompt,
-                temperature=_safe_float(
-                    mode_config.get(
-                        "temperature",
+
+            result = (
+                await self.request_with_fallback(
+                    primary_provider=selected_provider,
+                    primary_model=selected_model,
+                    messages=messages,
+                    system_prompt=system_prompt,
+                    temperature=_safe_float(
+                        mode_config.get(
+                            "temperature",
+                            0.7,
+                        ),
                         0.7,
                     ),
-                    0.7,
-                ),
-                max_tokens=_safe_int(
-                    mode_config.get(
-                        "max_tokens",
-                        1200,
-                    ),
-                    1200,
-                ),
+                    max_tokens=effective_max_tokens,
+                )
             )
 
         except Exception as exc:
@@ -1335,12 +1568,13 @@ class AIEngine:
         )
 
         if not result:
+
             raise RuntimeError(
                 "AI returned an empty response."
             )
 
         # ----------------------------------------------------
-        # SAVE MEMORY
+        # MEMORY
         # ----------------------------------------------------
 
         if (
@@ -1356,6 +1590,7 @@ class AIEngine:
             if memory_enabled:
 
                 try:
+
                     self.db.add_message(
                         guild_id=guild_id,
                         user_id=user_id,
@@ -1372,8 +1607,8 @@ class AIEngine:
 
                 except TypeError:
 
-                    # Compatibility fallback.
                     try:
+
                         self.db.add_message(
                             guild_id,
                             user_id,
@@ -1389,14 +1624,16 @@ class AIEngine:
                         )
 
                     except Exception as exc:
+
                         print(
-                            f"[AI] Memory save failed: "
+                            "[AI] Memory save failed: "
                             f"{exc}"
                         )
 
                 except Exception as exc:
+
                     print(
-                        f"[AI] Memory save failed: "
+                        "[AI] Memory save failed: "
                         f"{exc}"
                     )
 
@@ -1415,6 +1652,8 @@ class AIEngine:
         provider: Optional[str] = None,
         model: Optional[str] = None,
         character_name: Optional[str] = None,
+        channel_id: Optional[int] = None,
+        max_tokens_override: Optional[int] = None,
     ) -> str:
 
         return await self.generate(
@@ -1425,4 +1664,6 @@ class AIEngine:
             provider=provider,
             model=model,
             character_name=character_name,
+            channel_id=channel_id,
+            max_tokens_override=max_tokens_override,
         )
