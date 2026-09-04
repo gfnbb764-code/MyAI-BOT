@@ -156,6 +156,60 @@ DEFAULT_BOT_COOLDOWN = 2.0
 
 
 # ============================================================
+# MESSAGE DEDUPLICATION
+# ============================================================
+
+# يمنع معالجة نفس رسالة Discord أكثر من مرة
+# داخل نفس تشغيل البوت.
+#
+# مهم:
+# - يتم استخدامه لرسائل المستخدمين والـDM.
+# - لا نستخدمه لمنع Bot-to-Bot لأن كل رسالة بوت
+#   يجب أن تدخل في سلسلة Bot-to-Bot بشكل طبيعي.
+
+PROCESSED_AI_MESSAGES = {}
+
+PROCESSED_AI_MESSAGES_MAX = 5000
+
+
+def claim_ai_message(
+    message_id: int
+) -> bool:
+    """
+    Claims a Discord message for AI processing.
+
+    Returns:
+        True  -> الرسالة لم تتم معالجتها من قبل.
+        False -> الرسالة تمت معالجتها بالفعل.
+
+    يستخدم dict بدل set حتى نحافظ على ترتيب الإدخالات
+    ونستطيع حذف أقدم الرسائل عند امتلاء الذاكرة.
+    """
+
+    if message_id in PROCESSED_AI_MESSAGES:
+        return False
+
+    PROCESSED_AI_MESSAGES[
+        message_id
+    ] = time.monotonic()
+
+    if (
+        len(PROCESSED_AI_MESSAGES)
+        > PROCESSED_AI_MESSAGES_MAX
+    ):
+
+        oldest_id = next(
+            iter(PROCESSED_AI_MESSAGES)
+        )
+
+        del PROCESSED_AI_MESSAGES[
+            oldest_id
+        ]
+
+    return True
+
+
+# ============================================================
 # DISCORD
 # ============================================================
 
@@ -2166,8 +2220,6 @@ class CharacterEditModal(
         self.guild_id = guild_id
         self.character_name = character_name
 
-        # لا نسوي DB query هنا.
-        # السبب: send_modal يجب أن يكون أول ACK.
         self.personality.placeholder = (
             "اكتب الشخصية الجديدة"
         )
@@ -2288,14 +2340,11 @@ class CharacterEditSelect(
 
     async def callback(
         self,
-        interaction: discord.Interaction
+        interaction
     ):
 
         name = self.values[0]
 
-        # مهم جدًا:
-        # لا نستدعي SQLite قبل send_modal().
-        # نفتح الـModal فورًا، وبعد submit نفحص الملكية.
         try:
 
             await interaction.response.send_modal(
@@ -2817,8 +2866,6 @@ class TextSettingsModal(
 
         self.guild_id = guild_id
 
-        # لا يوجد DB هنا.
-        # الـModal يجب إرساله كأول ACK.
         self.history_limit.placeholder = "اتركه فارغًا = بدون تغيير"
         self.response_length.placeholder = "اتركه فارغًا = بدون تغيير"
         self.ai_timeout.placeholder = "اتركه فارغًا = بدون تغيير"
@@ -4943,6 +4990,22 @@ async def on_message(
 
             return
 
+        # ----------------------------------------------------
+        # DM DEDUPLICATION
+        # ----------------------------------------------------
+        #
+        # نفس رسالة الـDM لا يمكن أن تبدأ AI مرتين.
+
+        if not claim_ai_message(
+            message.id
+        ):
+
+            await bot.process_commands(
+                message
+            )
+
+            return
+
         try:
 
             async with message.channel.typing():
@@ -5166,6 +5229,33 @@ async def on_message(
             pass
 
         elif reply_type == "bot_chat":
+
+            await bot.process_commands(
+                message
+            )
+
+            return
+
+    # --------------------------------------------------------
+    # HUMAN MESSAGE DEDUPLICATION
+    # --------------------------------------------------------
+    #
+    # هذا هو الإصلاح الأساسي لمشكلة:
+    #
+    # ❌ حدث خطأ أثناء توليد الرد.
+    #
+    # ثم:
+    #
+    # ✅ رد Gemini ناجح.
+    #
+    # إذا وصلت نفس رسالة المستخدم للمعالجة أكثر من مرة،
+    # أول معالجة فقط ستأخذ الرسالة.
+
+    if not message.author.bot:
+
+        if not claim_ai_message(
+            message.id
+        ):
 
             await bot.process_commands(
                 message
