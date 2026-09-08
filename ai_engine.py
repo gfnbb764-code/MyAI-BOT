@@ -41,9 +41,10 @@ DEFAULT_PROVIDER = os.getenv(
 # GOOGLE
 # ------------------------------------------------------------
 
+# Lightweight / fast Gemini text model
 GOOGLE_DEFAULT_MODEL = os.getenv(
     "GOOGLE_MODEL",
-    "gemini-3.7-flash",
+    "gemini-3.1-flash-lite",
 ).strip()
 
 GOOGLE_IMAGE_MODEL = os.getenv(
@@ -77,19 +78,40 @@ ANTHROPIC_DEFAULT_MODEL = os.getenv(
 # ------------------------------------------------------------
 
 MODEL_ALIASES = {
-    # Old Gemini aliases
-    "gemini-2.5-flash-lite": "gemini-3.7-flash",
-    "gemini-3.5-flash-lite": "gemini-3.7-flash",
+    # --------------------------------------------------------
+    # Older Gemini text aliases
+    # --------------------------------------------------------
+    #
+    # These are redirected to the new lightweight model so
+    # older database/config values don't accidentally select
+    # an old/heavier Gemini model.
+    #
+
+    "gemini-2.5-flash-lite": "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite": "gemini-3.1-flash-lite",
+    "gemini-3.7-flash": "gemini-3.1-flash-lite",
 
     # Compatibility aliases
-    "gemini-flash": "gemini-3.7-flash",
+    "gemini-flash": "gemini-3.1-flash-lite",
+    "gemini-flash-lite": "gemini-3.1-flash-lite",
+
+    # New lightweight model aliases
+    "gemini-3.1-flash-lite-preview":
+        "gemini-3.1-flash-lite",
 
     # Image aliases
-    "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
+    "gemini-3.1-flash-image-preview":
+        "gemini-3.1-flash-image",
 
+    # --------------------------------------------------------
     # Legacy provider aliases
-    "gpt-5.6-luna": "gemini-3.7-flash",
-    "claude-sonnet-4-6": "gemini-3.7-flash",
+    # --------------------------------------------------------
+    #
+    # Kept for compatibility with older saved configurations.
+    #
+
+    "gpt-5.6-luna": "gemini-3.1-flash-lite",
+    "claude-sonnet-4-6": "gemini-3.1-flash-lite",
 }
 
 
@@ -1534,8 +1556,10 @@ When useful, include source names or links from the returned grounding informati
 """.strip()
 
         selected_model = (
-            model
-            or GOOGLE_DEFAULT_MODEL
+            resolve_model(
+                model,
+                "google",
+            )
         )
 
         messages = [
@@ -2089,7 +2113,7 @@ When useful, include source names or links from the returned grounding informati
                     "[AI] FAILED: "
                     "provider="
                     f"{current_provider} "
-                    "model={current_model}"
+                    f"model={current_model}"
                 )
 
                 print(
@@ -2598,8 +2622,10 @@ When useful, include source names or links from the returned grounding informati
             character=character,
             mode=mode,
             provider="google",
-            model=model
-            or GOOGLE_DEFAULT_MODEL,
+            model=(
+                model
+                or GOOGLE_DEFAULT_MODEL
+            ),
             history_limit=history_limit,
             max_tokens_override=max_tokens_override,
             temperature=temperature,
@@ -2770,7 +2796,7 @@ When useful, include source names or links from the returned grounding informati
                 text_value = getattr(
                     part,
                     "text",
-                    None,
+                    None
                 )
 
                 if text_value:
