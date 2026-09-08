@@ -1,3 +1,4 @@
+```python
 import os
 import json
 import sqlite3
@@ -14,7 +15,7 @@ DB_PATH = os.getenv(
     os.getenv("DB_PATH", "myai.db")
 )
 
-CURRENT_GOOGLE_MODEL = "gemini-3.5-flash-lite"
+CURRENT_GOOGLE_MODEL = "gemini-3.1-flash-lite"
 
 DEFAULT_SERVER_CHARACTER = "مساعد السيرفر جيميناي"
 DEFAULT_DM_CHARACTER = "مساعد MyAI"
@@ -254,7 +255,7 @@ class Database:
                 custom_instructions TEXT DEFAULT '',
                 speaking_style TEXT DEFAULT '',
                 provider TEXT DEFAULT 'google',
-                model TEXT DEFAULT 'gemini-3.5-flash-lite',
+                model TEXT DEFAULT 'gemini-3.1-flash-lite',
                 created_by INTEGER DEFAULT 0,
                 created_at TEXT,
                 UNIQUE(guild_id, name)
@@ -288,7 +289,7 @@ class Database:
                 guild_id INTEGER PRIMARY KEY,
                 active_character TEXT,
                 active_provider TEXT DEFAULT 'google',
-                active_model TEXT DEFAULT 'gemini-3.5-flash-lite',
+                active_model TEXT DEFAULT 'gemini-3.1-flash-lite',
                 ai_enabled INTEGER DEFAULT 1,
                 ai_channel_id INTEGER,
                 ai_mode TEXT DEFAULT 'normal',
@@ -312,7 +313,7 @@ class Database:
                 character_name TEXT,
                 permission_preset TEXT DEFAULT 'default',
                 provider TEXT DEFAULT 'google',
-                model TEXT DEFAULT 'gemini-3.5-flash-lite',
+                model TEXT DEFAULT 'gemini-3.1-flash-lite',
                 allow_management INTEGER DEFAULT 1,
                 allow_channel_management INTEGER DEFAULT 1,
                 allow_role_management INTEGER DEFAULT 1,
@@ -390,7 +391,7 @@ class Database:
                 custom_instructions TEXT DEFAULT '',
                 speaking_style TEXT DEFAULT '',
                 provider TEXT DEFAULT 'google',
-                model TEXT DEFAULT 'gemini-3.5-flash-lite',
+                model TEXT DEFAULT 'gemini-3.1-flash-lite',
                 created_at TEXT,
                 UNIQUE(user_id, name)
             )
@@ -523,7 +524,7 @@ class Database:
         self._add_column_if_missing(
             "characters",
             "model",
-            "TEXT DEFAULT 'gemini-3.5-flash-lite'"
+            "TEXT DEFAULT 'gemini-3.1-flash-lite'"
         )
 
         self._add_column_if_missing(
@@ -573,7 +574,7 @@ class Database:
         self._add_column_if_missing(
             "guild_settings",
             "active_model",
-            "TEXT DEFAULT 'gemini-3.5-flash-lite'"
+            "TEXT DEFAULT 'gemini-3.1-flash-lite'"
         )
 
         self._add_column_if_missing(
@@ -661,7 +662,7 @@ class Database:
         self._add_column_if_missing(
             "ai_config",
             "model",
-            "TEXT DEFAULT 'gemini-3.5-flash-lite'"
+            "TEXT DEFAULT 'gemini-3.1-flash-lite'"
         )
 
         self._add_column_if_missing(
@@ -3514,3 +3515,4 @@ class Database:
 
         except Exception:
             pass
+```
