@@ -15,7 +15,6 @@ from discord import app_commands
 
 from database import Database
 from ai_engine import AIEngine
-from ai_group import AIGroupManager
 from ai_tools import AITools
 
 
@@ -191,12 +190,6 @@ AI_SEMAPHORE = asyncio.Semaphore(
 )
 
 ACTIVE_REQUESTS = set()
-
-# يتم تهيئته داخل setup_hook
-ai_group = None
-
-# مهمة تشغيل البوتات الثانوية في الخلفية
-SECONDARY_STARTUP_TASK = None
 
 
 # ============================================================
@@ -594,31 +587,37 @@ def activate_character_for_user(
     user_id: int,
     character_name: str,
 ):
-    """Activate any existing server character for a user.
+    """
+    Activate any existing server character for a user.
 
     Preferred path uses Database.set_user_active_character().
-    A direct SQLite compatibility fallback is kept here so /character_use
-    still works with older database.py versions that incorrectly enforced
-    character ownership during activation.
+    A direct SQLite compatibility fallback is kept here so
+    /character_use still works with older database.py versions
+    that incorrectly enforced character ownership during activation.
     """
+
     try:
         setter = getattr(
             db,
             "set_user_active_character",
             None,
         )
+
         if callable(setter):
             success = setter(
                 guild_id,
                 user_id,
                 character_name,
             )
+
             if success:
                 return True
+
     except Exception:
         traceback.print_exc()
 
     conn = getattr(db, "conn", None)
+
     if conn is None:
         return False
 
@@ -656,10 +655,18 @@ def activate_character_for_user(
                 character_name = excluded.character_name,
                 updated_at = excluded.updated_at
             """,
-            (guild_id, user_id, character_name, now),
+            (
+                guild_id,
+                user_id,
+                character_name,
+                now,
+            ),
         )
+
         conn.commit()
+
         return True
+
     except (sqlite3.Error, Exception):
         traceback.print_exc()
         return False
@@ -1473,143 +1480,6 @@ async def generate_chat_reply(
 
 
 # ============================================================
-# AI GROUP GENERATION BRIDGE
-# ============================================================
-
-async def ai_group_generate(
-    guild_id: int,
-    slot: int,
-    user_id: int,
-    channel_id: int,
-    prompt: str,
-    bot_name: str,
-    personality: str,
-    speaking_style: str,
-    power: int,
-):
-    """
-    AI Group uses the SAME Provider + Model as MyAI.
-
-    AI Group already builds its own:
-        - conversation context
-        - per-bot memory
-        - character/personality context
-
-    Therefore the normal MyAI SQLite history is disabled
-    here to avoid duplicating context and wasting input tokens.
-    """
-
-    config = get_config(
-        guild_id
-    )
-
-    advanced = get_advanced(
-        guild_id
-    )
-
-    provider = config.get(
-        "provider",
-        PRIMARY_AI_PROVIDER
-    )
-
-    model = config.get(
-        "model",
-        GOOGLE_MODEL
-    )
-
-    character = {
-        "name": bot_name,
-
-        "description": (
-            f"عضو رقم {slot} في مجموعة MyAI."
-        ),
-
-        "personality": (
-            personality
-            or "ودود، ذكي، طبيعي."
-        ),
-
-        "speaking_style": (
-            speaking_style
-            or "تكلم بشكل طبيعي ومختصر."
-        ),
-
-        "custom_instructions": (
-            f"أنت العضو رقم {slot} في مجموعة AI. "
-            f"قوة شخصيتك الحالية {power}/100. "
-            "لا تدّعي أنك البوت الرئيسي."
-        ),
-
-        "system_prompt": "",
-
-        "character_type": "normal",
-
-        "provider": provider,
-
-        "model": model,
-    }
-
-    response_length = int(
-        advanced.get(
-            "response_length",
-            1200
-        )
-    )
-
-    timeout = int(
-        advanced.get(
-            "timeout",
-            DEFAULT_AI_TIMEOUT
-        )
-    )
-
-    mode = config.get(
-        "mode",
-        "normal"
-    )
-
-    async with AI_SEMAPHORE:
-
-        result = await asyncio.wait_for(
-
-            ai.generate(
-
-                guild_id=guild_id,
-
-                channel_id=channel_id,
-
-                user_id=user_id,
-
-                prompt=prompt,
-
-                character=character,
-
-                mode=mode,
-
-                provider=provider,
-
-                model=model,
-
-                # ====================================================
-                # IMPORTANT:
-                # AI Group already has its own conversation + memory.
-                # Do NOT add the normal SQLite history again.
-                # ====================================================
-                history_limit=0,
-
-                max_tokens_override=response_length,
-
-            ),
-
-            timeout=timeout
-        )
-
-        return str(
-            result or ""
-        ).strip()
-
-
-# ============================================================
 # DM AI
 # ============================================================
 
@@ -2135,9 +2005,6 @@ class CharacterUseSelect(
             )
 
             return
-
-        # /character_use يسمح لأي عضو باستخدام أي شخصية داخل نفس السيرفر.
-        # صلاحيات التعديل والحذف تبقى منفصلة ومحصورة بمالك الشخصية.
 
         try:
 
@@ -4176,7 +4043,6 @@ async def character_use(
     if not interaction.guild:
         return
 
-    # جميع شخصيات السيرفر متاحة للاختيار، وليس الشخصيات التي أنشأها العضو فقط.
     characters = list(
         get_all_characters(
             interaction.guild.id
@@ -4532,8 +4398,13 @@ async def _safe_defer(
     try:
         if interaction.response.is_done():
             return True
-        await interaction.response.defer(ephemeral=ephemeral)
+
+        await interaction.response.defer(
+            ephemeral=ephemeral
+        )
+
         return True
+
     except Exception:
         return False
 
@@ -4544,11 +4415,14 @@ async def _safe_edit_original(
     **kwargs,
 ):
     try:
+
         await interaction.edit_original_response(
             content=content,
             **kwargs,
         )
+
         return True
+
     except Exception:
         return False
 
@@ -4586,6 +4460,7 @@ async def ai_image(
         return
 
     try:
+
         await _safe_edit_original(
             interaction,
             "🎨 جاري إنشاء الصورة…",
@@ -4608,12 +4483,18 @@ async def ai_image(
         )
 
     except Exception as exc:
+
         print(
-            f"[TOOL IMAGE ERROR] {type(exc).__name__}: {exc}"
+            f"[TOOL IMAGE ERROR] "
+            f"{type(exc).__name__}: {exc}"
         )
+
         await _safe_edit_original(
             interaction,
-            "❌ تعذر إنشاء الصورة. تأكد من إعداد API الخاص بأداة الصور.",
+            (
+                "❌ تعذر إنشاء الصورة. "
+                "تأكد من إعداد API الخاص بأداة الصور."
+            ),
         )
 
 
@@ -4632,6 +4513,7 @@ async def ai_search(
         return
 
     try:
+
         await _safe_edit_original(
             interaction,
             "🌐 جاري البحث في الويب…",
@@ -4649,9 +4531,12 @@ async def ai_search(
         sources = result.get("sources") or []
 
         if sources:
+
             text += "\n\n**المصادر:**\n"
+
             text += "\n".join(
-                f"• [{item.get('title', 'مصدر')}]({item.get('url')})"
+                f"• [{item.get('title', 'مصدر')}]"
+                f"({item.get('url')})"
                 for item in sources[:8]
                 if item.get("url")
             )
@@ -4670,18 +4555,27 @@ async def ai_search(
         )
 
         for chunk in chunks[1:]:
+
             await interaction.channel.send(
                 chunk,
-                allowed_mentions=discord.AllowedMentions.none(),
+                allowed_mentions=(
+                    discord.AllowedMentions.none()
+                ),
             )
 
     except Exception as exc:
+
         print(
-            f"[TOOL SEARCH ERROR] {type(exc).__name__}: {exc}"
+            f"[TOOL SEARCH ERROR] "
+            f"{type(exc).__name__}: {exc}"
         )
+
         await _safe_edit_original(
             interaction,
-            "❌ تعذر تنفيذ البحث. تأكد من إعداد API الخاص بالبحث.",
+            (
+                "❌ تعذر تنفيذ البحث. "
+                "تأكد من إعداد API الخاص بالبحث."
+            ),
         )
 
 
@@ -4696,13 +4590,28 @@ async def ai_search(
 )
 @app_commands.choices(
     seconds=[
-        app_commands.Choice(name="4 ثواني", value="4"),
-        app_commands.Choice(name="8 ثواني", value="8"),
-        app_commands.Choice(name="12 ثانية", value="12"),
+        app_commands.Choice(
+            name="4 ثواني",
+            value="4"
+        ),
+        app_commands.Choice(
+            name="8 ثواني",
+            value="8"
+        ),
+        app_commands.Choice(
+            name="12 ثانية",
+            value="12"
+        ),
     ],
     size=[
-        app_commands.Choice(name="1280x720", value="1280x720"),
-        app_commands.Choice(name="720x1280", value="720x1280"),
+        app_commands.Choice(
+            name="1280x720",
+            value="1280x720"
+        ),
+        app_commands.Choice(
+            name="720x1280",
+            value="720x1280"
+        ),
     ],
 )
 async def ai_video(
@@ -4715,9 +4624,13 @@ async def ai_video(
         return
 
     try:
+
         await _safe_edit_original(
             interaction,
-            "🎬 جاري إنشاء الفيديو… قد يستغرق بعض الوقت.",
+            (
+                "🎬 جاري إنشاء الفيديو… "
+                "قد يستغرق بعض الوقت."
+            ),
         )
 
         video_bytes = await tools.create_video(
@@ -4738,12 +4651,18 @@ async def ai_video(
         )
 
     except Exception as exc:
+
         print(
-            f"[TOOL VIDEO ERROR] {type(exc).__name__}: {exc}"
+            f"[TOOL VIDEO ERROR] "
+            f"{type(exc).__name__}: {exc}"
         )
+
         await _safe_edit_original(
             interaction,
-            "❌ تعذر إنشاء الفيديو. تأكد من إعداد API الخاص بالفيديو.",
+            (
+                "❌ تعذر إنشاء الفيديو. "
+                "تأكد من إعداد API الخاص بالفيديو."
+            ),
         )
 
 
@@ -4757,14 +4676,38 @@ async def ai_video(
 )
 @app_commands.choices(
     extension=[
-        app_commands.Choice(name="TXT", value="txt"),
-        app_commands.Choice(name="Markdown", value="md"),
-        app_commands.Choice(name="JSON", value="json"),
-        app_commands.Choice(name="CSV", value="csv"),
-        app_commands.Choice(name="Python", value="py"),
-        app_commands.Choice(name="HTML", value="html"),
-        app_commands.Choice(name="CSS", value="css"),
-        app_commands.Choice(name="JavaScript", value="js"),
+        app_commands.Choice(
+            name="TXT",
+            value="txt"
+        ),
+        app_commands.Choice(
+            name="Markdown",
+            value="md"
+        ),
+        app_commands.Choice(
+            name="JSON",
+            value="json"
+        ),
+        app_commands.Choice(
+            name="CSV",
+            value="csv"
+        ),
+        app_commands.Choice(
+            name="Python",
+            value="py"
+        ),
+        app_commands.Choice(
+            name="HTML",
+            value="html"
+        ),
+        app_commands.Choice(
+            name="CSS",
+            value="css"
+        ),
+        app_commands.Choice(
+            name="JavaScript",
+            value="js"
+        ),
     ]
 )
 async def ai_file(
@@ -4775,22 +4718,43 @@ async def ai_file(
     if not await _safe_defer(interaction):
         return
 
-    async def ai_file_generate(content_prompt: str):
+    async def ai_file_generate(
+        content_prompt: str
+    ):
         result = await ai.generate(
-            guild_id=interaction.guild.id if interaction.guild else None,
-            channel_id=interaction.channel.id if interaction.channel else None,
+            guild_id=(
+                interaction.guild.id
+                if interaction.guild
+                else None
+            ),
+
+            channel_id=(
+                interaction.channel.id
+                if interaction.channel
+                else None
+            ),
+
             user_id=interaction.user.id,
+
             prompt=content_prompt,
+
             character=None,
+
             mode="normal",
+
             provider="google",
+
             model=GOOGLE_MODEL,
+
             history_limit=0,
+
             max_tokens_override=4000,
         )
+
         return result
 
     try:
+
         await _safe_edit_original(
             interaction,
             "📄 جاري إنشاء الملف…",
@@ -4815,9 +4779,12 @@ async def ai_file(
         )
 
     except Exception as exc:
+
         print(
-            f"[TOOL FILE ERROR] {type(exc).__name__}: {exc}"
+            f"[TOOL FILE ERROR] "
+            f"{type(exc).__name__}: {exc}"
         )
+
         await _safe_edit_original(
             interaction,
             "❌ تعذر إنشاء الملف.",
@@ -4843,34 +4810,6 @@ async def on_message(
         == bot.user.id
     ):
         return
-
-    # --------------------------------------------------------
-    # AI GROUP
-    # --------------------------------------------------------
-
-    if (
-        ai_group is not None
-        and message.guild is not None
-        and not message.author.bot
-    ):
-
-        try:
-
-            consumed = await ai_group.handle_message(
-                message
-            )
-
-            if consumed:
-
-                await bot.process_commands(
-                    message
-                )
-
-                return
-
-        except Exception:
-
-            traceback.print_exc()
 
     # --------------------------------------------------------
     # DIRECT MESSAGES
@@ -5270,17 +5209,6 @@ async def on_ready():
         f"Servers: {len(bot.guilds)}"
     )
 
-    if ai_group is not None:
-
-        print(
-            (
-                "[AI_GROUP] "
-                f"{ai_group.ready_count()}/"
-                f"{ai_group.configured_count()} "
-                "secondary bots online"
-            )
-        )
-
     print("=" * 60)
 
 
@@ -5316,73 +5244,13 @@ async def on_app_command_error(
 
 
 # ============================================================
-# SECONDARY BOT STARTUP
-# ============================================================
-
-async def start_secondary_bots_safe():
-
-    global ai_group
-
-    if ai_group is None:
-
-        print(
-            "[AI_GROUP] Manager is not initialized."
-        )
-
-        return
-
-    try:
-
-        # ai_group.start_clients() مسؤول عن
-        # رسائل تشغيل البوتات الثانوية.
-        await ai_group.start_clients()
-
-    except asyncio.CancelledError:
-
-        print(
-            "[AI_GROUP] Secondary startup task cancelled."
-        )
-
-        raise
-
-    except Exception:
-
-        print(
-            "[FATAL] Secondary bot startup failed:"
-        )
-
-        traceback.print_exc()
-
-
-# ============================================================
 # SETUP HOOK
 # ============================================================
 
 @bot.event
 async def setup_hook():
 
-    global ai_group
-    global SECONDARY_STARTUP_TASK
-
     try:
-
-        # ----------------------------------------------------
-        # إنشاء مدير AI Group
-        # ----------------------------------------------------
-
-        ai_group = AIGroupManager(
-            main_bot=bot,
-            db_path=db.path,
-            ai_generate=ai_group_generate,
-        )
-
-        # ----------------------------------------------------
-        # تسجيل أمر /ai_group
-        # ----------------------------------------------------
-
-        await ai_group.register_command(
-            bot.tree
-        )
 
         # ----------------------------------------------------
         # Sync commands
@@ -5393,42 +5261,6 @@ async def setup_hook():
         print(
             f"[commands] synced {len(synced)} commands"
         )
-
-        print(
-            (
-                "[AI_GROUP] "
-                f"configured="
-                f"{ai_group.configured_count()}/5"
-            )
-        )
-
-        # ----------------------------------------------------
-        # تشغيل البوتات الثانوية في الخلفية
-        # ----------------------------------------------------
-
-        if (
-            SECONDARY_STARTUP_TASK is None
-            or SECONDARY_STARTUP_TASK.done()
-        ):
-
-            SECONDARY_STARTUP_TASK = (
-                asyncio.create_task(
-                    start_secondary_bots_safe(),
-                    name="secondary_bot_startup",
-                )
-            )
-
-            print(
-                "[AI_GROUP] Secondary bots are "
-                "starting in the background..."
-            )
-
-        else:
-
-            print(
-                "[AI_GROUP] Secondary startup task "
-                "already exists."
-            )
 
     except asyncio.CancelledError:
 
