@@ -36,15 +36,22 @@ DEFAULT_VIDEO_MODEL = os.getenv(
 ).strip()
 
 
+# ============================================================
+# LIGHTWEIGHT GOOGLE MODEL
+# ============================================================
+# Gemini 3.1 Flash-Lite
+# يستخدم للبحث والنص وإنشاء الملفات.
+# ============================================================
+
 DEFAULT_SEARCH_MODEL = os.getenv(
     "GOOGLE_SEARCH_MODEL",
-    "gemini-3.7-flash",
+    "gemini-3.1-flash-lite",
 ).strip()
 
 
 DEFAULT_TEXT_MODEL = os.getenv(
     "GOOGLE_MODEL",
-    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
 ).strip()
 
 
