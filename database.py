@@ -1,4 +1,3 @@
-```python
 import os
 import json
 import sqlite3
@@ -3515,4 +3514,3 @@ class Database:
 
         except Exception:
             pass
-```
