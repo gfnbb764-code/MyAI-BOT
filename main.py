@@ -6,7 +6,6 @@ import traceback
 import time
 import json
 import io
-import sqlite3
 from typing import Optional
 
 import discord
@@ -240,24 +239,29 @@ def get_config(guild_id: int):
 
     return {
         "guild_id": guild_id,
+
         "enabled": bool(
             data.get(
                 "enabled",
                 data.get("ai_enabled", True)
             )
         ),
+
         "channel_id": data.get(
             "channel_id",
             data.get("ai_channel_id")
         ),
+
         "mode": data.get(
             "mode",
             data.get("ai_mode", "normal")
         ) or "normal",
+
         "reply_type": data.get(
             "reply_type",
             "mention"
         ) or "mention",
+
         "character": data.get(
             "character",
             data.get(
@@ -265,6 +269,7 @@ def get_config(guild_id: int):
                 data.get("active_character")
             )
         ),
+
         "provider": data.get(
             "provider",
             data.get(
@@ -272,6 +277,7 @@ def get_config(guild_id: int):
                 PRIMARY_AI_PROVIDER
             )
         ) or PRIMARY_AI_PROVIDER,
+
         "model": data.get(
             "model",
             data.get(
@@ -303,6 +309,7 @@ def update_config(
             key,
             key
         )
+
         normalized[target] = value
 
     try:
@@ -310,14 +317,19 @@ def update_config(
             guild_id,
             **normalized
         )
+
     except Exception:
+
         try:
             return db.save_ai_config(
                 guild_id,
                 **normalized
             )
+
         except Exception:
+
             traceback.print_exc()
+
             return False
 
 
@@ -344,6 +356,7 @@ def get_advanced(
         row = db.get_ai_advanced_settings(
             guild_id
         )
+
     except Exception:
         return defaults
 
@@ -351,6 +364,7 @@ def get_advanced(
         return defaults
 
     data = row_to_dict(row) or {}
+
     result = defaults.copy()
 
     for key in [
@@ -363,6 +377,7 @@ def get_advanced(
         "bot_chat_max_chain",
         "bot_chat_cooldown",
     ]:
+
         if (
             key in data
             and data[key] is not None
@@ -374,12 +389,16 @@ def get_advanced(
         "deny_members",
         "sensitive_keywords",
     ]:
+
         value = data.get(key)
 
         if isinstance(value, str):
+
             try:
                 value = json.loads(value)
+
             except Exception:
+
                 value = [
                     x.strip()
                     for x in value.split(",")
@@ -404,6 +423,7 @@ def get_advanced(
     )
 
     try:
+
         result["history_limit"] = max(
             0,
             min(
@@ -411,10 +431,13 @@ def get_advanced(
                 int(result["history_limit"])
             )
         )
+
     except Exception:
+
         result["history_limit"] = 20
 
     try:
+
         result["response_length"] = max(
             100,
             min(
@@ -422,10 +445,13 @@ def get_advanced(
                 int(result["response_length"])
             )
         )
+
     except Exception:
+
         result["response_length"] = 1200
 
     try:
+
         result["timeout"] = max(
             10,
             min(
@@ -433,10 +459,13 @@ def get_advanced(
                 int(result["timeout"])
             )
         )
+
     except Exception:
+
         result["timeout"] = DEFAULT_AI_TIMEOUT
 
     try:
+
         result["bot_chat_max_chain"] = max(
             1,
             min(
@@ -444,10 +473,15 @@ def get_advanced(
                 int(result["bot_chat_max_chain"])
             )
         )
+
     except Exception:
-        result["bot_chat_max_chain"] = DEFAULT_MAX_BOT_CHAIN
+
+        result["bot_chat_max_chain"] = (
+            DEFAULT_MAX_BOT_CHAIN
+        )
 
     try:
+
         result["bot_chat_cooldown"] = max(
             0.0,
             min(
@@ -455,8 +489,12 @@ def get_advanced(
                 float(result["bot_chat_cooldown"])
             )
         )
+
     except Exception:
-        result["bot_chat_cooldown"] = DEFAULT_BOT_COOLDOWN
+
+        result["bot_chat_cooldown"] = (
+            DEFAULT_BOT_COOLDOWN
+        )
 
     return result
 
@@ -466,21 +504,31 @@ def save_advanced(
     settings: dict
 ):
     try:
+
         return db.save_ai_advanced_settings(
             guild_id,
             settings
         )
+
     except TypeError:
+
         try:
+
             return db.save_ai_advanced_settings(
                 guild_id,
                 **settings
             )
+
         except Exception:
+
             traceback.print_exc()
+
             return False
+
     except Exception:
+
         traceback.print_exc()
+
         return False
 
 
@@ -488,11 +536,15 @@ def reset_advanced(
     guild_id: int
 ):
     try:
+
         return db.reset_ai_advanced_settings(
             guild_id
         )
+
     except Exception:
+
         traceback.print_exc()
+
         return False
 
 
@@ -508,18 +560,14 @@ def get_character(
         return None
 
     try:
+
         return db.get_character(
             guild_id,
             character_name
         )
-    except TypeError:
-        try:
-            return db.get_character(
-                character_name
-            )
-        except Exception:
-            return None
+
     except Exception:
+
         return None
 
 
@@ -527,15 +575,21 @@ def get_all_characters(
     guild_id: int
 ):
     try:
+
         return db.get_characters(
             guild_id
         )
+
     except Exception:
+
         try:
+
             return db.list_characters(
                 guild_id
             )
+
         except Exception:
+
             return []
 
 
@@ -544,11 +598,14 @@ def get_user_characters(
     user_id: int
 ):
     try:
+
         return db.get_user_characters(
             guild_id,
             user_id
         )
+
     except Exception:
+
         return []
 
 
@@ -557,6 +614,7 @@ def get_active_character_for_user(
     user_id: int
 ):
     try:
+
         character = db.get_user_active_character(
             guild_id,
             user_id
@@ -566,9 +624,11 @@ def get_active_character_for_user(
             return character
 
     except Exception:
+
         traceback.print_exc()
 
     try:
+
         character = db.get_active_character(
             guild_id
         )
@@ -577,6 +637,7 @@ def get_active_character_for_user(
             return character
 
     except Exception:
+
         traceback.print_exc()
 
     return None
@@ -589,86 +650,22 @@ def activate_character_for_user(
 ):
     """
     Activate any existing server character for a user.
-
-    Preferred path uses Database.set_user_active_character().
-    A direct SQLite compatibility fallback is kept here so
-    /character_use still works with older database.py versions
-    that incorrectly enforced character ownership during activation.
     """
 
     try:
-        setter = getattr(
-            db,
-            "set_user_active_character",
-            None,
-        )
 
-        if callable(setter):
-            success = setter(
+        return bool(
+            db.set_user_active_character(
                 guild_id,
                 user_id,
                 character_name,
             )
-
-            if success:
-                return True
+        )
 
     except Exception:
+
         traceback.print_exc()
 
-    conn = getattr(db, "conn", None)
-
-    if conn is None:
-        return False
-
-    try:
-        row = conn.execute(
-            """
-            SELECT name
-            FROM characters
-            WHERE guild_id = ?
-              AND name = ?
-            LIMIT 1
-            """,
-            (guild_id, character_name),
-        ).fetchone()
-
-        if not row:
-            return False
-
-        now = time.strftime(
-            "%Y-%m-%d %H:%M:%S",
-            time.gmtime(),
-        )
-
-        conn.execute(
-            """
-            INSERT INTO user_character_settings (
-                guild_id,
-                user_id,
-                character_name,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(guild_id, user_id)
-            DO UPDATE SET
-                character_name = excluded.character_name,
-                updated_at = excluded.updated_at
-            """,
-            (
-                guild_id,
-                user_id,
-                character_name,
-                now,
-            ),
-        )
-
-        conn.commit()
-
-        return True
-
-    except (sqlite3.Error, Exception):
-        traceback.print_exc()
         return False
 
 
@@ -699,6 +696,7 @@ def clean_mentions(
         return ""
 
     if bot.user:
+
         content = content.replace(
             f"<@{bot.user.id}>",
             ""
@@ -746,10 +744,13 @@ async def get_referenced_message(
         return None
 
     try:
+
         return await message.channel.fetch_message(
             message_id
         )
+
     except Exception:
+
         return None
 
 
@@ -804,6 +805,7 @@ async def build_message_context(
         )
 
     if mentioned_users:
+
         context_parts.append(
             "المستخدمون المذكورون في الرسالة: "
             + ", ".join(
@@ -838,6 +840,7 @@ async def build_message_context(
         ).strip()
 
         if len(referenced_content) > 3000:
+
             referenced_content = (
                 referenced_content[:3000]
                 + "..."
@@ -883,48 +886,209 @@ async def build_message_context(
     )
 
 
+# ============================================================
+# SMART DISCORD MESSAGE SPLITTER
+# ============================================================
+
 def split_message(
     text: str,
     limit: int = 1900
 ):
+    """
+    Splits long Discord messages while trying to preserve
+    Markdown code blocks.
+
+    Discord has a 2000 character limit, so we stay below it.
+    """
+
     if not text:
         return []
+
+    text = str(text)
 
     if len(text) <= limit:
         return [text]
 
     chunks = []
 
-    while len(text) > limit:
+    current = ""
+    in_code_block = False
+    code_language = ""
 
-        split_at = text.rfind(
-            "\n",
-            0,
-            limit
-        )
+    lines = text.splitlines(
+        keepends=True
+    )
 
-        if split_at <= 0:
-            split_at = text.rfind(
-                " ",
-                0,
-                limit
+    def flush_current():
+        nonlocal current
+
+        if current.strip():
+
+            chunks.append(
+                current.rstrip()
             )
 
-        if split_at <= 0:
-            split_at = limit
+        current = ""
+
+    for line in lines:
+
+        stripped = line.lstrip()
+
+        if stripped.startswith("```"):
+
+            if not in_code_block:
+
+                language = (
+                    stripped[3:]
+                    .strip()
+                    .split()[0]
+                    if stripped[3:].strip()
+                    else ""
+                )
+
+                code_language = language
+                in_code_block = True
+
+            else:
+
+                in_code_block = False
+                code_language = ""
+
+        if (
+            len(current)
+            + len(line)
+            <= limit
+        ):
+
+            current += line
+
+            continue
+
+        # ----------------------------------------------------
+        # Current chunk is full.
+        # ----------------------------------------------------
+
+        if in_code_block:
+
+            closing = "\n```"
+
+            available = (
+                limit
+                - len(current)
+                - len(closing)
+            )
+
+            if available > 0:
+
+                current += line[:available]
+
+                line = line[available:]
+
+            current += closing
+
+            flush_current()
+
+            language = (
+                code_language
+                if code_language
+                else ""
+            )
+
+            current = (
+                f"```{language}\n"
+            )
+
+            if line:
+
+                while len(line) > limit - len(current) - 4:
+
+                    available = (
+                        limit
+                        - len(current)
+                        - 4
+                    )
+
+                    if available <= 0:
+                        break
+
+                    piece = line[:available]
+                    line = line[available:]
+
+                    current += piece
+                    current += "\n```"
+
+                    flush_current()
+
+                    current = (
+                        f"```{language}\n"
+                    )
+
+                current += line
+
+        else:
+
+            flush_current()
+
+            # Very long single line.
+            while len(line) > limit:
+
+                chunks.append(
+                    line[:limit].rstrip()
+                )
+
+                line = line[limit:]
+
+            current = line
+
+    if current.strip():
+
+        if in_code_block:
+
+            if not current.rstrip().endswith(
+                "```"
+            ):
+
+                current = (
+                    current.rstrip()
+                    + "\n```"
+                )
 
         chunks.append(
-            text[:split_at].strip()
+            current.rstrip()
         )
 
-        text = text[
-            split_at:
-        ].strip()
+    # --------------------------------------------------------
+    # Safety pass
+    # --------------------------------------------------------
 
-    if text:
-        chunks.append(text)
+    final_chunks = []
 
-    return chunks
+    for chunk in chunks:
+
+        if len(chunk) <= limit:
+
+            final_chunks.append(chunk)
+
+            continue
+
+        # Extremely rare fallback.
+        start = 0
+
+        while start < len(chunk):
+
+            final_chunks.append(
+                chunk[
+                    start:start + limit
+                ]
+            )
+
+            start += limit
+
+    return [
+        chunk
+        for chunk in final_chunks
+        if chunk
+    ]
 
 
 def normalize_channel_id(
@@ -935,7 +1099,9 @@ def normalize_channel_id(
 
     try:
         return int(value)
+
     except Exception:
+
         return None
 
 
@@ -1053,11 +1219,15 @@ def member_allowed(
         "deny_members",
         []
     ):
+
         try:
+
             deny_members.add(
                 int(value)
             )
+
         except Exception:
+
             pass
 
     if user_id in deny_members:
@@ -1071,12 +1241,14 @@ def member_allowed(
     if allow_members:
 
         try:
+
             allow_ids = {
                 int(value)
                 for value in allow_members
             }
 
         except Exception:
+
             allow_ids = set()
 
         return user_id in allow_ids
@@ -1114,6 +1286,7 @@ def contains_sensitive_content(
         )
 
         if keyword and keyword in text:
+
             return True
 
     return False
@@ -1145,6 +1318,7 @@ def get_bot_lock(
     guild_id: int
 ):
     if guild_id not in BOT_CHAT_LOCKS:
+
         BOT_CHAT_LOCKS[guild_id] = (
             asyncio.Lock()
         )
@@ -1255,29 +1429,31 @@ def should_process_bot_chat(
 
 
 # ============================================================
-# SAVE MESSAGE
+# DATABASE MEMORY HELPERS
 # ============================================================
 
-def save_database_message(
-    message: discord.Message,
-    character_name: Optional[str] = None
+def save_guild_memory(
+    guild_id: int,
+    channel_id: int,
+    user_id: int,
+    character_name: Optional[str],
+    role: str,
+    content: str,
 ):
-    if not message.guild:
+    """
+    Saves a guild message exactly once.
+
+    Important:
+    AIEngine.generate() already loads the history and adds
+    the current prompt internally, so the current user message
+    must NOT be saved before generation.
+    """
+
+    if not content:
         return False
 
-    guild_id = message.guild.id
-    channel_id = message.channel.id
-    user_id = message.author.id
-
-    role = (
-        "assistant"
-        if message.author.bot
-        else "user"
-    )
-
-    content = message.content
-
     try:
+
         return db.add_message(
             guild_id,
             channel_id,
@@ -1287,9 +1463,10 @@ def save_database_message(
             content
         )
 
-    except TypeError:
+    except Exception:
 
         try:
+
             return db.save_message(
                 guild_id=guild_id,
                 channel_id=channel_id,
@@ -1302,6 +1479,7 @@ def save_database_message(
         except Exception:
 
             try:
+
                 return db.save_message(
                     guild_id=guild_id,
                     channel_id=channel_id,
@@ -1311,13 +1489,56 @@ def save_database_message(
                 )
 
             except Exception:
+
+                traceback.print_exc()
+
                 return False
 
-    except Exception:
 
-        traceback.print_exc()
+def save_generated_guild_memory(
+    message: discord.Message,
+    response: str,
+    character_name: Optional[str],
+    user_content: Optional[str] = None,
+):
+    """
+    Saves the completed conversation after successful
+    generation.
 
-        return False
+    This prevents the current user message from being
+    duplicated in AIEngine history.
+    """
+
+    if not message.guild:
+        return
+
+    guild_id = message.guild.id
+    channel_id = message.channel.id
+    user_id = message.author.id
+
+    if user_content:
+        save_guild_memory(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=user_id,
+            character_name=character_name,
+            role="user",
+            content=user_content,
+        )
+
+    if response:
+        save_guild_memory(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=(
+                bot.user.id
+                if bot.user
+                else 0
+            ),
+            character_name=character_name,
+            role="assistant",
+            content=response,
+        )
 
 
 # ============================================================
@@ -1362,6 +1583,7 @@ async def generate_chat_reply(
     )
 
     if not prompt:
+
         prompt = (
             "رد على المستخدم بشكل طبيعي."
         )
@@ -1449,7 +1671,9 @@ async def generate_chat_reply(
                         else 0
                     ),
 
-                    max_tokens_override=response_length,
+                    max_tokens_override=(
+                        response_length
+                    ),
 
                 ),
 
@@ -1683,6 +1907,7 @@ async def generate_with_typing_message(
         if not response:
 
             if placeholder:
+
                 await placeholder.delete()
 
             return
@@ -1700,6 +1925,7 @@ async def generate_with_typing_message(
         if not chunks:
 
             if placeholder:
+
                 await placeholder.delete()
 
             return
@@ -1723,12 +1949,34 @@ async def generate_with_typing_message(
                 )
             )
 
+        # ----------------------------------------------------
+        # MEMORY IS SAVED ONLY AFTER SUCCESS
+        # ----------------------------------------------------
+
+        character_data = (
+            row_to_dict(character)
+            or {}
+        )
+
+        character_name_for_memory = (
+            character_data.get("name")
+            or None
+        )
+
+        save_generated_guild_memory(
+            message=message,
+            response=response,
+            character_name=character_name_for_memory,
+            user_content=prompt,
+        )
+
     except asyncio.CancelledError:
 
         if placeholder:
 
             try:
                 await placeholder.delete()
+
             except Exception:
                 pass
 
@@ -1830,7 +2078,6 @@ class CharacterInfoSelect(
         self,
         interaction: discord.Interaction
     ):
-
         name = self.values[0]
 
         character = get_character(
@@ -1986,7 +2233,6 @@ class CharacterUseSelect(
         self,
         interaction: discord.Interaction
     ):
-
         if not interaction.guild:
             return
 
@@ -2147,7 +2393,6 @@ class CharacterEditModal(
         self,
         interaction: discord.Interaction
     ):
-
         name = self.character.get(
             "name"
         )
@@ -2225,7 +2470,6 @@ class CharacterEditSelect(
         self,
         interaction: discord.Interaction
     ):
-
         character = get_character(
             self.guild_id,
             self.values[0]
@@ -2322,7 +2566,6 @@ class CharacterDeleteConfirm(
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
-
         if interaction.user.id != self.owner_id:
 
             await interaction.response.send_message(
@@ -2376,7 +2619,6 @@ class CharacterDeleteConfirm(
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
-
         await interaction.response.edit_message(
             content="❌ تم إلغاء الحذف.",
             embed=None,
@@ -2408,7 +2650,6 @@ class CharacterDeleteSelect(
         self,
         interaction: discord.Interaction
     ):
-
         character = get_character(
             self.guild_id,
             self.values[0]
@@ -2743,7 +2984,6 @@ class TextSettingsModal(
         self,
         interaction: discord.Interaction
     ):
-
         settings = get_advanced(
             self.guild_id
         )
@@ -2906,7 +3146,6 @@ class AllowDenyModal(
         self,
         interaction: discord.Interaction
     ):
-
         settings = get_advanced(
             self.guild_id
         )
@@ -3352,6 +3591,7 @@ class ReplyTypeSelect(
             )
 
             if not success:
+
                 raise RuntimeError(
                     "Failed to save reply type."
                 )
@@ -3462,6 +3702,7 @@ class ModeSelect(
             )
 
             if not success:
+
                 raise RuntimeError(
                     "Failed to save mode."
                 )
@@ -3577,6 +3818,7 @@ class CharacterDashboardSelect(
             )
 
             if not success:
+
                 raise RuntimeError(
                     "Failed to activate server character."
                 )
@@ -3681,6 +3923,7 @@ class ChannelSelect(
             )
 
             if not success:
+
                 raise RuntimeError(
                     "Failed to save channel."
                 )
@@ -3959,37 +4202,6 @@ async def character_create(
             ephemeral=True
         )
 
-    except TypeError:
-
-        try:
-
-            db.create_character(
-                interaction.guild.id,
-                name,
-                character_type=selected_character_type,
-                created_by=interaction.user.id,
-                provider=PRIMARY_AI_PROVIDER,
-                model=GOOGLE_MODEL
-            )
-
-            await interaction.response.send_message(
-                (
-                    f"✅ تم إنشاء الشخصية **{name}** بنجاح!\n"
-                    "🎭 النوع الداخلي: **عادي**.\n"
-                    "👤 يمكنك الآن اختيارها باستخدام `/character_use`."
-                ),
-                ephemeral=True
-            )
-
-        except Exception:
-
-            traceback.print_exc()
-
-            await interaction.response.send_message(
-                "❌ تعذر إنشاء الشخصية. ربما الاسم مستخدم مسبقًا.",
-                ephemeral=True
-            )
-
     except Exception:
 
         traceback.print_exc()
@@ -4213,9 +4425,10 @@ async def character_list(
 
     if len(text) > 1900:
 
-        text = text[
-            :1890
-        ] + "\n..."
+        text = (
+            text[:1890]
+            + "\n..."
+        )
 
     await interaction.response.send_message(
         text,
@@ -4331,6 +4544,10 @@ async def ai_memory_clear(
             interaction.guild.id
         )
 
+        reset_bot_chain(
+            interaction.guild.id
+        )
+
         await interaction.response.send_message(
             "🧹 تم مسح ذاكرة AI.",
             ephemeral=True
@@ -4396,6 +4613,7 @@ async def _safe_defer(
     ephemeral: bool = False,
 ):
     try:
+
         if interaction.response.is_done():
             return True
 
@@ -4406,6 +4624,7 @@ async def _safe_defer(
         return True
 
     except Exception:
+
         return False
 
 
@@ -4424,8 +4643,13 @@ async def _safe_edit_original(
         return True
 
     except Exception:
+
         return False
 
+
+# ============================================================
+# AI IMAGE
+# ============================================================
 
 @bot.tree.command(
     name="ai_image",
@@ -4498,6 +4722,10 @@ async def ai_image(
         )
 
 
+# ============================================================
+# AI SEARCH
+# ============================================================
+
 @bot.tree.command(
     name="ai_search",
     description="بحث مباشر في الويب",
@@ -4528,11 +4756,15 @@ async def ai_search(
             or "ما لقيت نتيجة واضحة."
         )
 
-        sources = result.get("sources") or []
+        sources = result.get(
+            "sources"
+        ) or []
 
         if sources:
 
-            text += "\n\n**المصادر:**\n"
+            text += (
+                "\n\n**المصادر:**\n"
+            )
 
             text += "\n".join(
                 f"• [{item.get('title', 'مصدر')}]"
@@ -4547,7 +4779,10 @@ async def ai_search(
         )
 
         if not chunks:
-            chunks = ["ما لقيت نتيجة واضحة."]
+
+            chunks = [
+                "ما لقيت نتيجة واضحة."
+            ]
 
         await _safe_edit_original(
             interaction,
@@ -4578,6 +4813,10 @@ async def ai_search(
             ),
         )
 
+
+# ============================================================
+# AI VIDEO
+# ============================================================
 
 @bot.tree.command(
     name="ai_video",
@@ -4666,6 +4905,10 @@ async def ai_video(
         )
 
 
+# ============================================================
+# AI FILE
+# ============================================================
+
 @bot.tree.command(
     name="ai_file",
     description="إنشاء ملف بواسطة الذكاء الاصطناعي",
@@ -4718,37 +4961,107 @@ async def ai_file(
     if not await _safe_defer(interaction):
         return
 
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Use the SAME active character / mode / provider / model
+    # as normal AI conversations.
+    # --------------------------------------------------------
+
+    guild_id = (
+        interaction.guild.id
+        if interaction.guild
+        else 0
+    )
+
+    channel_id = (
+        interaction.channel.id
+        if interaction.channel
+        else 0
+    )
+
+    config = (
+        get_config(guild_id)
+        if interaction.guild
+        else {
+            "mode": "normal",
+            "provider": PRIMARY_AI_PROVIDER,
+            "model": GOOGLE_MODEL,
+        }
+    )
+
+    advanced = (
+        get_advanced(guild_id)
+        if interaction.guild
+        else {
+            "response_length": 4000,
+        }
+    )
+
+    active_character = None
+
+    if interaction.guild:
+
+        active_character = (
+            get_active_character_for_user(
+                interaction.guild.id,
+                interaction.user.id
+            )
+        )
+
+    response_length = int(
+        advanced.get(
+            "response_length",
+            4000
+        )
+    )
+
+    # Files need more room than normal chat.
+    response_length = max(
+        100,
+        min(
+            8000,
+            max(
+                response_length,
+                4000
+            )
+        )
+    )
+
     async def ai_file_generate(
         content_prompt: str
     ):
         result = await ai.generate(
-            guild_id=(
-                interaction.guild.id
-                if interaction.guild
-                else None
-            ),
 
-            channel_id=(
-                interaction.channel.id
-                if interaction.channel
-                else None
-            ),
+            guild_id=guild_id,
+
+            channel_id=channel_id,
 
             user_id=interaction.user.id,
 
             prompt=content_prompt,
 
-            character=None,
+            character=active_character,
 
-            mode="normal",
+            mode=config.get(
+                "mode",
+                "normal"
+            ),
 
-            provider="google",
+            provider=config.get(
+                "provider",
+                PRIMARY_AI_PROVIDER
+            ),
 
-            model=GOOGLE_MODEL,
+            model=config.get(
+                "model",
+                GOOGLE_MODEL
+            ),
 
+            # Don't load chat history into generated files.
+            # The file request itself is enough context.
             history_limit=0,
 
-            max_tokens_override=4000,
+            max_tokens_override=response_length,
         )
 
         return result
@@ -4899,50 +5212,6 @@ async def on_message(
     )
 
     # --------------------------------------------------------
-    # SAVE MESSAGE
-    # --------------------------------------------------------
-
-    try:
-
-        character_name = config.get(
-            "character"
-        )
-
-        if not message.author.bot:
-
-            user_character = (
-                get_active_character_for_user(
-                    message.guild.id,
-                    message.author.id
-                )
-            )
-
-            user_character_data = (
-                row_to_dict(
-                    user_character
-                )
-                or {}
-            )
-
-            if user_character_data:
-
-                character_name = (
-                    user_character_data.get(
-                        "name"
-                    )
-                    or character_name
-                )
-
-        save_database_message(
-            message,
-            character_name
-        )
-
-    except Exception:
-
-        traceback.print_exc()
-
-    # --------------------------------------------------------
     # AI ENABLED
     # --------------------------------------------------------
 
@@ -5067,6 +5336,7 @@ async def on_message(
             "channel",
             "auto"
         ):
+
             pass
 
         elif reply_type == "bot_chat":
@@ -5148,6 +5418,52 @@ async def on_message(
                 await send_ai_response(
                     message,
                     response
+                )
+
+                # ------------------------------------------------
+                # Save bot conversation only AFTER successful reply
+                # ------------------------------------------------
+
+                character = (
+                    get_active_character_for_user(
+                        message.guild.id,
+                        message.author.id
+                    )
+                )
+
+                character_data = (
+                    row_to_dict(character)
+                    or {}
+                )
+
+                character_name = (
+                    character_data.get("name")
+                    or config.get("character")
+                    or None
+                )
+
+                # Incoming bot message.
+                save_guild_memory(
+                    guild_id=message.guild.id,
+                    channel_id=message.channel.id,
+                    user_id=message.author.id,
+                    character_name=character_name,
+                    role="user",
+                    content=message.content,
+                )
+
+                # MyAI response.
+                save_guild_memory(
+                    guild_id=message.guild.id,
+                    channel_id=message.channel.id,
+                    user_id=(
+                        bot.user.id
+                        if bot.user
+                        else 0
+                    ),
+                    character_name=character_name,
+                    role="assistant",
+                    content=response,
                 )
 
                 BOT_CHAT_LAST_RESPONSE[
@@ -5251,10 +5567,6 @@ async def on_app_command_error(
 async def setup_hook():
 
     try:
-
-        # ----------------------------------------------------
-        # Sync commands
-        # ----------------------------------------------------
 
         synced = await bot.tree.sync()
 
