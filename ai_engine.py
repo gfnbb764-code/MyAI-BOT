@@ -4,6 +4,7 @@ import asyncio
 import base64
 import mimetypes
 import textwrap
+import traceback
 from pathlib import Path
 from typing import Optional, Any
 
@@ -53,6 +54,57 @@ ANTHROPIC_DEFAULT_MODEL = os.getenv(
 
 
 # ============================================================
+# RETRY CONFIG
+# ============================================================
+
+# Number of attempts for temporary provider errors.
+# 3 means:
+# attempt 1 -> immediate
+# attempt 2 -> after first backoff
+# attempt 3 -> after second backoff
+DEFAULT_RETRY_ATTEMPTS = 3
+
+AI_RETRY_ATTEMPTS = max(
+    1,
+    min(
+        6,
+        int(
+            os.getenv(
+                "AI_RETRY_ATTEMPTS",
+                DEFAULT_RETRY_ATTEMPTS
+            )
+        )
+    )
+)
+
+AI_RETRY_BASE_DELAY = max(
+    0.5,
+    min(
+        30.0,
+        float(
+            os.getenv(
+                "AI_RETRY_BASE_DELAY",
+                "2.0"
+            )
+        )
+    )
+)
+
+AI_RETRY_MAX_DELAY = max(
+    AI_RETRY_BASE_DELAY,
+    min(
+        120.0,
+        float(
+            os.getenv(
+                "AI_RETRY_MAX_DELAY",
+                "20.0"
+            )
+        )
+    )
+)
+
+
+# ============================================================
 # MODEL ALIASES
 # ============================================================
 
@@ -80,7 +132,7 @@ MODEL_ALIASES = {
     "gemini-3.1-flash-image-preview":
         "gemini-3.1-flash-image",
 
-    # Legacy providers
+    # Legacy provider aliases
     "gpt-5.6-luna":
         "gemini-3.1-flash-lite",
 
@@ -282,6 +334,118 @@ def normalize_mode(
     return "normal"
 
 
+def is_transient_status(
+    status: int
+):
+    return status in {
+        408,
+        425,
+        429,
+        500,
+        502,
+        503,
+        504,
+    }
+
+
+def get_retry_delay(
+    attempt: int
+):
+    """
+    Exponential backoff.
+
+    attempt 0 -> base delay
+    attempt 1 -> base * 2
+    attempt 2 -> base * 4
+    """
+
+    delay = (
+        AI_RETRY_BASE_DELAY
+        * (2 ** attempt)
+    )
+
+    return min(
+        AI_RETRY_MAX_DELAY,
+        delay
+    )
+
+
+def exception_is_transient(
+    exc: Exception
+):
+    """
+    Detect temporary provider failures.
+
+    Handles:
+    - HTTP 408
+    - HTTP 425
+    - HTTP 429
+    - HTTP 500
+    - HTTP 502
+    - HTTP 503
+    - HTTP 504
+    - Google ServerError
+    - messages containing UNAVAILABLE / RESOURCE_EXHAUSTED
+    """
+
+    text = str(
+        exc
+    ).upper()
+
+    transient_words = {
+        "503",
+        "502",
+        "504",
+        "429",
+        "408",
+        "425",
+        "UNAVAILABLE",
+        "RESOURCE_EXHAUSTED",
+        "RATE LIMIT",
+        "TOO MANY REQUESTS",
+        "HIGH DEMAND",
+        "TEMPORARY",
+        "OVERLOADED",
+        "INTERNAL SERVER ERROR",
+        "BAD GATEWAY",
+        "GATEWAY TIMEOUT",
+        "SERVICE UNAVAILABLE",
+    }
+
+    if any(
+        word in text
+        for word in transient_words
+    ):
+        return True
+
+    status = getattr(
+        exc,
+        "status_code",
+        None
+    )
+
+    if status is None:
+        status = getattr(
+            exc,
+            "code",
+            None
+        )
+
+    try:
+        status = int(
+            status
+        )
+    except Exception:
+        status = None
+
+    if status is not None:
+        return is_transient_status(
+            status
+        )
+
+    return False
+
+
 # ============================================================
 # AI ENGINE
 # ============================================================
@@ -407,7 +571,12 @@ class AIEngine:
                     )
                 )
 
-            except Exception:
+            except Exception as exc:
+
+                print(
+                    "[AI] Failed to initialize "
+                    f"Google client: {exc}"
+                )
 
                 self.google_client = None
 
@@ -716,6 +885,7 @@ Conversation continuity:
 - If the latest request contradicts an older request, follow the latest request.
 - Preserve relevant facts from earlier messages when they are useful.
 - Ignore irrelevant older topics.
+- The newest user request has priority over older conversation context.
 """
         )
 
@@ -963,16 +1133,21 @@ Security rules:
             else:
                 api_role = "user"
 
+            content = clean_text(
+                message.get(
+                    "content",
+                    ""
+                )
+            )
+
+            if not content:
+                continue
+
             contents.append({
                 "role": api_role,
                 "parts": [
                     {
-                        "text": clean_text(
-                            message.get(
-                                "content",
-                                ""
-                            )
-                        )
+                        "text": content
                     }
                 ]
             })
@@ -1004,7 +1179,9 @@ Security rules:
 
         last_error = None
 
-        for attempt in range(3):
+        for attempt in range(
+            AI_RETRY_ATTEMPTS
+        ):
 
             try:
 
@@ -1020,23 +1197,44 @@ Security rules:
 
                         raw = await response.text()
 
-                        if response.status in (
-                            429,
-                            503,
-                            502,
-                            504,
+                        if is_transient_status(
+                            response.status
                         ):
 
                             last_error = RuntimeError(
                                 f"Google temporary error "
-                                f"{response.status}: {raw[:500]}"
+                                f"{response.status}: "
+                                f"{raw[:500]}"
                             )
 
-                            await asyncio.sleep(
-                                1.5 * (attempt + 1)
-                            )
+                            if (
+                                attempt
+                                < AI_RETRY_ATTEMPTS - 1
+                            ):
 
-                            continue
+                                delay = get_retry_delay(
+                                    attempt
+                                )
+
+                                print(
+                                    "[AI] Google temporary "
+                                    f"HTTP {response.status}"
+                                )
+
+                                print(
+                                    "[AI] Retry "
+                                    f"{attempt + 1}/"
+                                    f"{AI_RETRY_ATTEMPTS - 1} "
+                                    f"in {delay:.1f}s..."
+                                )
+
+                                await asyncio.sleep(
+                                    delay
+                                )
+
+                                continue
+
+                            break
 
                         if response.status >= 400:
 
@@ -1097,11 +1295,35 @@ Security rules:
 
                 last_error = exc
 
-                if attempt < 2:
+                if (
+                    exception_is_transient(exc)
+                    and attempt
+                    < AI_RETRY_ATTEMPTS - 1
+                ):
+
+                    delay = get_retry_delay(
+                        attempt
+                    )
+
+                    print(
+                        "[AI] Google transient error: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
+                    print(
+                        "[AI] Retry "
+                        f"{attempt + 1}/"
+                        f"{AI_RETRY_ATTEMPTS - 1} "
+                        f"in {delay:.1f}s..."
+                    )
 
                     await asyncio.sleep(
-                        1.5 * (attempt + 1)
+                        delay
                     )
+
+                    continue
+
+                break
 
         raise last_error or RuntimeError(
             "Google generation failed."
@@ -1195,9 +1417,6 @@ Security rules:
 
             except Exception:
 
-                # Some SDK versions may expose search
-                # differently. Let the request proceed
-                # without the tool rather than crashing.
                 pass
 
         config = types.GenerateContentConfig(
@@ -1212,78 +1431,149 @@ Security rules:
                 config=config,
             )
 
-        response = await asyncio.to_thread(
-            do_request
-        )
+        last_error = None
 
-        # ----------------------------------------------------
-        # Extract response text robustly.
-        # ----------------------------------------------------
+        for attempt in range(
+            AI_RETRY_ATTEMPTS
+        ):
 
-        text = getattr(
-            response,
-            "text",
-            None
-        )
+            try:
 
-        if text:
+                response = await asyncio.to_thread(
+                    do_request
+                )
 
-            return str(
-                text
-            ).strip()
+                # ------------------------------------------------
+                # Extract response text robustly.
+                # ------------------------------------------------
 
-        candidates = getattr(
-            response,
-            "candidates",
-            None
-        )
-
-        text_parts = []
-
-        if candidates:
-
-            for candidate in candidates:
-
-                content = getattr(
-                    candidate,
-                    "content",
+                text = getattr(
+                    response,
+                    "text",
                     None
                 )
 
-                if not content:
-                    continue
+                if text:
 
-                parts = getattr(
-                    content,
-                    "parts",
+                    return str(
+                        text
+                    ).strip()
+
+                candidates = getattr(
+                    response,
+                    "candidates",
                     None
-                ) or []
+                )
 
-                for part in parts:
+                text_parts = []
 
-                    part_text = getattr(
-                        part,
-                        "text",
+                if candidates:
+
+                    for candidate in candidates:
+
+                        content = getattr(
+                            candidate,
+                            "content",
+                            None
+                        )
+
+                        if not content:
+                            continue
+
+                        parts = getattr(
+                            content,
+                            "parts",
+                            None
+                        ) or []
+
+                        for part in parts:
+
+                            part_text = getattr(
+                                part,
+                                "text",
+                                None
+                            )
+
+                            if part_text:
+
+                                text_parts.append(
+                                    str(part_text)
+                                )
+
+                result = "\n".join(
+                    text_parts
+                ).strip()
+
+                if not result:
+
+                    raise RuntimeError(
+                        "Google SDK returned empty text."
+                    )
+
+                return result
+
+            except asyncio.CancelledError:
+
+                raise
+
+            except Exception as exc:
+
+                last_error = exc
+
+                if (
+                    exception_is_transient(exc)
+                    and attempt
+                    < AI_RETRY_ATTEMPTS - 1
+                ):
+
+                    delay = get_retry_delay(
+                        attempt
+                    )
+
+                    status_hint = ""
+
+                    status = getattr(
+                        exc,
+                        "status_code",
                         None
                     )
 
-                    if part_text:
-
-                        text_parts.append(
-                            str(part_text)
+                    if status is None:
+                        status = getattr(
+                            exc,
+                            "code",
+                            None
                         )
 
-        result = "\n".join(
-            text_parts
-        ).strip()
+                    if status:
+                        status_hint = (
+                            f" ({status})"
+                        )
 
-        if not result:
+                    print(
+                        "[AI] Google temporary error"
+                        f"{status_hint}: "
+                        f"{type(exc).__name__}"
+                    )
 
-            raise RuntimeError(
-                "Google SDK returned empty text."
-            )
+                    print(
+                        "[AI] Retry "
+                        f"{attempt + 1}/"
+                        f"{AI_RETRY_ATTEMPTS - 1} "
+                        f"in {delay:.1f}s..."
+                    )
 
-        return result
+                    await asyncio.sleep(
+                        delay
+                    )
+
+                    continue
+
+                break
+
+        raise last_error or RuntimeError(
+            "Google SDK generation failed."
+        )
 
 
     # ========================================================
@@ -1387,59 +1677,145 @@ Rules:
             total=self.timeout
         )
 
-        async with aiohttp.ClientSession(
-            timeout=timeout
-        ) as session:
+        last_error = None
 
-            async with session.post(
-                self.openai_endpoint,
-                headers=headers,
-                json=payload,
-            ) as response:
+        for attempt in range(
+            AI_RETRY_ATTEMPTS
+        ):
 
-                raw = await response.text()
+            try:
 
-                if response.status >= 400:
+                async with aiohttp.ClientSession(
+                    timeout=timeout
+                ) as session:
 
-                    raise RuntimeError(
-                        f"OpenAI API error "
-                        f"{response.status}: "
-                        f"{raw[:1000]}"
+                    async with session.post(
+                        self.openai_endpoint,
+                        headers=headers,
+                        json=payload,
+                    ) as response:
+
+                        raw = await response.text()
+
+                        if (
+                            is_transient_status(
+                                response.status
+                            )
+                            and attempt
+                            < AI_RETRY_ATTEMPTS - 1
+                        ):
+
+                            last_error = RuntimeError(
+                                f"OpenAI temporary error "
+                                f"{response.status}: "
+                                f"{raw[:500]}"
+                            )
+
+                            delay = get_retry_delay(
+                                attempt
+                            )
+
+                            print(
+                                "[AI] OpenAI temporary "
+                                f"HTTP {response.status}"
+                            )
+
+                            print(
+                                "[AI] OpenAI retry "
+                                f"{attempt + 1}/"
+                                f"{AI_RETRY_ATTEMPTS - 1} "
+                                f"in {delay:.1f}s..."
+                            )
+
+                            await asyncio.sleep(
+                                delay
+                            )
+
+                            continue
+
+                        if response.status >= 400:
+
+                            raise RuntimeError(
+                                f"OpenAI API error "
+                                f"{response.status}: "
+                                f"{raw[:1000]}"
+                            )
+
+                        data = json.loads(
+                            raw
+                        )
+
+                        choices = data.get(
+                            "choices",
+                            []
+                        )
+
+                        if not choices:
+
+                            raise RuntimeError(
+                                "OpenAI returned no choices."
+                            )
+
+                        message = choices[0].get(
+                            "message",
+                            {}
+                        )
+
+                        result = clean_text(
+                            message.get(
+                                "content"
+                            )
+                        )
+
+                        if not result:
+
+                            raise RuntimeError(
+                                "OpenAI returned empty text."
+                            )
+
+                        return result
+
+            except asyncio.CancelledError:
+
+                raise
+
+            except Exception as exc:
+
+                last_error = exc
+
+                if (
+                    exception_is_transient(exc)
+                    and attempt
+                    < AI_RETRY_ATTEMPTS - 1
+                ):
+
+                    delay = get_retry_delay(
+                        attempt
                     )
 
-                data = json.loads(
-                    raw
-                )
-
-                choices = data.get(
-                    "choices",
-                    []
-                )
-
-                if not choices:
-
-                    raise RuntimeError(
-                        "OpenAI returned no choices."
+                    print(
+                        "[AI] OpenAI transient error: "
+                        f"{type(exc).__name__}: {exc}"
                     )
 
-                message = choices[0].get(
-                    "message",
-                    {}
-                )
-
-                result = clean_text(
-                    message.get(
-                        "content"
-                    )
-                )
-
-                if not result:
-
-                    raise RuntimeError(
-                        "OpenAI returned empty text."
+                    print(
+                        "[AI] OpenAI retry "
+                        f"{attempt + 1}/"
+                        f"{AI_RETRY_ATTEMPTS - 1} "
+                        f"in {delay:.1f}s..."
                     )
 
-                return result
+                    await asyncio.sleep(
+                        delay
+                    )
+
+                    continue
+
+                break
+
+        raise last_error or RuntimeError(
+            "OpenAI generation failed."
+        )
 
 
     # ========================================================
@@ -1487,61 +1863,147 @@ Rules:
             total=self.timeout
         )
 
-        async with aiohttp.ClientSession(
-            timeout=timeout
-        ) as session:
+        last_error = None
 
-            async with session.post(
-                self.anthropic_endpoint,
-                headers=headers,
-                json=payload,
-            ) as response:
+        for attempt in range(
+            AI_RETRY_ATTEMPTS
+        ):
 
-                raw = await response.text()
+            try:
 
-                if response.status >= 400:
+                async with aiohttp.ClientSession(
+                    timeout=timeout
+                ) as session:
 
-                    raise RuntimeError(
-                        f"Anthropic API error "
-                        f"{response.status}: "
-                        f"{raw[:1000]}"
-                    )
+                    async with session.post(
+                        self.anthropic_endpoint,
+                        headers=headers,
+                        json=payload,
+                    ) as response:
 
-                data = json.loads(
-                    raw
-                )
+                        raw = await response.text()
 
-                content = data.get(
-                    "content",
-                    []
-                )
-
-                text_parts = []
-
-                for item in content:
-
-                    if item.get(
-                        "type"
-                    ) == "text":
-
-                        text_parts.append(
-                            item.get(
-                                "text",
-                                ""
+                        if (
+                            is_transient_status(
+                                response.status
                             )
+                            and attempt
+                            < AI_RETRY_ATTEMPTS - 1
+                        ):
+
+                            last_error = RuntimeError(
+                                f"Anthropic temporary error "
+                                f"{response.status}: "
+                                f"{raw[:500]}"
+                            )
+
+                            delay = get_retry_delay(
+                                attempt
+                            )
+
+                            print(
+                                "[AI] Anthropic temporary "
+                                f"HTTP {response.status}"
+                            )
+
+                            print(
+                                "[AI] Anthropic retry "
+                                f"{attempt + 1}/"
+                                f"{AI_RETRY_ATTEMPTS - 1} "
+                                f"in {delay:.1f}s..."
+                            )
+
+                            await asyncio.sleep(
+                                delay
+                            )
+
+                            continue
+
+                        if response.status >= 400:
+
+                            raise RuntimeError(
+                                f"Anthropic API error "
+                                f"{response.status}: "
+                                f"{raw[:1000]}"
+                            )
+
+                        data = json.loads(
+                            raw
                         )
 
-                result = "\n".join(
-                    text_parts
-                ).strip()
+                        content = data.get(
+                            "content",
+                            []
+                        )
 
-                if not result:
+                        text_parts = []
 
-                    raise RuntimeError(
-                        "Anthropic returned empty text."
+                        for item in content:
+
+                            if item.get(
+                                "type"
+                            ) == "text":
+
+                                text_parts.append(
+                                    item.get(
+                                        "text",
+                                        ""
+                                    )
+                                )
+
+                        result = "\n".join(
+                            text_parts
+                        ).strip()
+
+                        if not result:
+
+                            raise RuntimeError(
+                                "Anthropic returned empty text."
+                            )
+
+                        return result
+
+            except asyncio.CancelledError:
+
+                raise
+
+            except Exception as exc:
+
+                last_error = exc
+
+                if (
+                    exception_is_transient(exc)
+                    and attempt
+                    < AI_RETRY_ATTEMPTS - 1
+                ):
+
+                    delay = get_retry_delay(
+                        attempt
                     )
 
-                return result
+                    print(
+                        "[AI] Anthropic transient error: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
+                    print(
+                        "[AI] Anthropic retry "
+                        f"{attempt + 1}/"
+                        f"{AI_RETRY_ATTEMPTS - 1} "
+                        f"in {delay:.1f}s..."
+                    )
+
+                    await asyncio.sleep(
+                        delay
+                    )
+
+                    continue
+
+                break
+
+        raise last_error or RuntimeError(
+            "Anthropic generation failed."
+        )
 
 
     # ========================================================
@@ -1573,11 +2035,18 @@ Rules:
             if name not in providers:
                 providers.append(name)
 
+        # ----------------------------------------------------
+        # Requested provider first.
+        # ----------------------------------------------------
+
         add_provider(
             provider
         )
 
-        # Google is the primary configured provider.
+        # ----------------------------------------------------
+        # Automatic fallback providers.
+        # ----------------------------------------------------
+
         if self.google_api_key:
             add_provider("google")
 
@@ -1593,9 +2062,14 @@ Rules:
 
             try:
 
+                print(
+                    "[AI] Trying provider="
+                    f"{current_provider}"
+                )
+
                 if current_provider == "google":
 
-                    return await self._google_sdk(
+                    result = await self._google_sdk(
 
                         model=(
                             model
@@ -1611,6 +2085,8 @@ Rules:
 
                         temperature=temperature,
                     )
+
+                    return result
 
                 if current_provider == "openai":
 
@@ -1670,10 +2146,23 @@ Rules:
 
             except Exception as exc:
 
-                errors.append(
+                error_text = (
                     f"{current_provider}: "
                     f"{type(exc).__name__}: {exc}"
                 )
+
+                errors.append(
+                    error_text
+                )
+
+                print(
+                    "[AI] Provider failed: "
+                    f"{error_text}"
+                )
+
+                # ------------------------------------------------
+                # Continue to the next provider.
+                # ------------------------------------------------
 
                 continue
 
@@ -2077,7 +2566,8 @@ Rules:
         #
         # The current prompt is appended ONLY HERE.
         #
-        # main.py must not save it before this point.
+        # main.py must NOT save the current guild prompt
+        # before calling generate().
         # ----------------------------------------------------
 
         messages.append({
@@ -2103,7 +2593,7 @@ Rules:
         )
 
         # ----------------------------------------------------
-        # Generate
+        # Generation request log
         # ----------------------------------------------------
 
         print(
@@ -2113,8 +2603,13 @@ Rules:
             f"mode={mode} | "
             f"history_limit={history_limit} | "
             f"max_tokens={max_tokens} | "
-            f"google_search={use_search}"
+            f"google_search={use_search} | "
+            f"retry_attempts={AI_RETRY_ATTEMPTS}"
         )
+
+        # ----------------------------------------------------
+        # Generate
+        # ----------------------------------------------------
 
         try:
 
@@ -2135,6 +2630,10 @@ Rules:
                     ),
 
                     timeout=self.timeout
+                    + (
+                        AI_RETRY_MAX_DELAY
+                        * AI_RETRY_ATTEMPTS
+                    )
                 )
 
             else:
@@ -2151,6 +2650,10 @@ Rules:
                     ),
 
                     timeout=self.timeout
+                    + (
+                        AI_RETRY_MAX_DELAY
+                        * AI_RETRY_ATTEMPTS
+                    )
                 )
 
         except asyncio.CancelledError:
@@ -2163,11 +2666,7 @@ Rules:
                 "[AI] Generation failed:"
             )
 
-            traceback_print = True
-
-            if traceback_print:
-                import traceback
-                traceback.print_exc()
+            traceback.print_exc()
 
             raise
 
@@ -2242,7 +2741,7 @@ Rules:
             "[AI] SUCCESS | "
             f"provider={selected_provider} | "
             f"model={selected_model} | "
-            f"characters={character_name}"
+            f"character={character_name}"
         )
 
         return result
@@ -2358,11 +2857,6 @@ Rules:
             ]
         )
 
-        # ----------------------------------------------------
-        # Newer SDKs may expose image configuration through
-        # response_format.
-        # ----------------------------------------------------
-
         try:
 
             config.response_format = {
@@ -2373,6 +2867,7 @@ Rules:
             }
 
         except Exception:
+
             pass
 
         def do_request():
@@ -2386,75 +2881,125 @@ Rules:
                 config=config,
             )
 
-        response = await asyncio.to_thread(
-            do_request
-        )
+        last_error = None
 
-        candidates = getattr(
-            response,
-            "candidates",
-            None
-        )
+        for attempt in range(
+            AI_RETRY_ATTEMPTS
+        ):
 
-        if not candidates:
+            try:
 
-            raise RuntimeError(
-                "Image model returned no candidates."
-            )
+                response = await asyncio.to_thread(
+                    do_request
+                )
 
-        for candidate in candidates:
-
-            content = getattr(
-                candidate,
-                "content",
-                None
-            )
-
-            if not content:
-                continue
-
-            parts = getattr(
-                content,
-                "parts",
-                None
-            ) or []
-
-            for part in parts:
-
-                inline_data = getattr(
-                    part,
-                    "inline_data",
+                candidates = getattr(
+                    response,
+                    "candidates",
                     None
                 )
 
-                if inline_data:
+                if not candidates:
 
-                    data = getattr(
-                        inline_data,
-                        "data",
+                    raise RuntimeError(
+                        "Image model returned no candidates."
+                    )
+
+                for candidate in candidates:
+
+                    content = getattr(
+                        candidate,
+                        "content",
                         None
                     )
 
-                    if data:
+                    if not content:
+                        continue
 
-                        if isinstance(
-                            data,
-                            str
-                        ):
+                    parts = getattr(
+                        content,
+                        "parts",
+                        None
+                    ) or []
 
-                            try:
+                    for part in parts:
 
-                                data = base64.b64decode(
-                                    data
-                                )
+                        inline_data = getattr(
+                            part,
+                            "inline_data",
+                            None
+                        )
 
-                            except Exception:
-                                pass
+                        if inline_data:
 
-                        return data
+                            data = getattr(
+                                inline_data,
+                                "data",
+                                None
+                            )
 
-        raise RuntimeError(
-            "Image generation returned no image data."
+                            if data:
+
+                                if isinstance(
+                                    data,
+                                    str
+                                ):
+
+                                    try:
+
+                                        data = base64.b64decode(
+                                            data
+                                        )
+
+                                    except Exception:
+                                        pass
+
+                                return data
+
+                raise RuntimeError(
+                    "Image generation returned no image data."
+                )
+
+            except asyncio.CancelledError:
+
+                raise
+
+            except Exception as exc:
+
+                last_error = exc
+
+                if (
+                    exception_is_transient(exc)
+                    and attempt
+                    < AI_RETRY_ATTEMPTS - 1
+                ):
+
+                    delay = get_retry_delay(
+                        attempt
+                    )
+
+                    print(
+                        "[AI] Image generation temporary "
+                        f"error: {exc}"
+                    )
+
+                    print(
+                        "[AI] Image retry "
+                        f"{attempt + 1}/"
+                        f"{AI_RETRY_ATTEMPTS - 1} "
+                        f"in {delay:.1f}s..."
+                    )
+
+                    await asyncio.sleep(
+                        delay
+                    )
+
+                    continue
+
+                break
+
+        raise last_error or RuntimeError(
+            "Image generation failed."
         )
 
 
@@ -2543,9 +3088,68 @@ Rules:
                 config=config,
             )
 
-        operation = await asyncio.to_thread(
-            start_request
-        )
+        last_error = None
+
+        # ----------------------------------------------------
+        # Starting video operation can also receive temporary
+        # provider errors.
+        # ----------------------------------------------------
+
+        for attempt in range(
+            AI_RETRY_ATTEMPTS
+        ):
+
+            try:
+
+                operation = await asyncio.to_thread(
+                    start_request
+                )
+
+                break
+
+            except asyncio.CancelledError:
+
+                raise
+
+            except Exception as exc:
+
+                last_error = exc
+
+                if (
+                    exception_is_transient(exc)
+                    and attempt
+                    < AI_RETRY_ATTEMPTS - 1
+                ):
+
+                    delay = get_retry_delay(
+                        attempt
+                    )
+
+                    print(
+                        "[AI] Video generation temporary "
+                        f"error: {exc}"
+                    )
+
+                    print(
+                        "[AI] Video retry "
+                        f"{attempt + 1}/"
+                        f"{AI_RETRY_ATTEMPTS - 1} "
+                        f"in {delay:.1f}s..."
+                    )
+
+                    await asyncio.sleep(
+                        delay
+                    )
+
+                    continue
+
+                raise
+
+        else:
+
+            raise last_error or RuntimeError(
+                "Video generation failed."
+            )
 
         started = asyncio.get_running_loop().time()
 
@@ -2935,10 +3539,9 @@ Important file-generation rules:
         # Remove accidental outer code fences.
         # ----------------------------------------------------
 
-        if result.startswith(
-            "```"
-        ) and result.endswith(
-            "```"
+        if (
+            result.startswith("```")
+            and result.endswith("```")
         ):
 
             lines = result.splitlines()
@@ -2949,9 +3552,10 @@ Important file-generation rules:
 
                 last = lines[-1].strip()
 
-                if first.startswith(
-                    "```"
-                ) and last == "```":
+                if (
+                    first.startswith("```")
+                    and last == "```"
+                ):
 
                     result = "\n".join(
                         lines[1:-1]
@@ -3139,16 +3743,27 @@ Important file-generation rules:
     ):
         status = {
             "provider": DEFAULT_PROVIDER,
+
             "google": bool(
                 self.google_client
             ),
+
             "openai": bool(
                 self.openai_api_key
             ),
+
             "anthropic": bool(
                 self.anthropic_api_key
             ),
+
             "model": GOOGLE_DEFAULT_MODEL,
+
+            "retry_attempts": AI_RETRY_ATTEMPTS,
+
+            "retry_base_delay": AI_RETRY_BASE_DELAY,
+
+            "retry_max_delay": AI_RETRY_MAX_DELAY,
+
             "tools": self.get_tool_status(),
         }
 
